@@ -1,0 +1,948 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MYND Main Circuit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root { color-scheme: light; --bg: #fff; --ink: #1a1a1a; --ink-2: #6e6e6a; --ink-3: #b4b3ae; --ghost: #dedcd6; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { color-scheme: dark; --bg: #161616; --ink: #e8e7e3; --ink-2: #9a9994; --ink-3: #55554f; --ghost: #3a3a37; }
+}
+:root[data-theme="dark"] { color-scheme: dark; --bg: #161616; --ink: #e8e7e3; --ink-2: #9a9994; --ink-3: #55554f; --ghost: #3a3a37; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); }
+body { font: calc(14px * var(--fs, 1))/1.4 "IBM Plex Sans", system-ui, sans-serif; display: flex; flex-direction: column; }
+header { padding: 20px 16px 12px; display: flex; flex-wrap: nowrap; align-items: baseline; gap: 6px 18px; white-space: nowrap; }
+h1 { font-size: calc(15px * var(--fs, 1)); font-weight: 500; margin: 0; letter-spacing: .01em; }
+header a { font-size: 12px; color: var(--ink-2); }
+header input { font: 12px "IBM Plex Mono", monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--ink-3); padding: 3px 6px; width: 180px; }
+header input:focus { outline: none; border-color: var(--ink); }
+#status { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-2); }
+.layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 24px; padding: 0 16px 16px; }
+.layout { position: relative; }
+.layout.folded { grid-template-columns: minmax(0, 1fr); }
+.layout.folded aside { position: absolute; top: 0; right: 16px; background: transparent; overflow: visible; pointer-events: none; padding: 0; }
+.layout.folded aside > :not(.lg-fold) { display: none; }
+.layout.folded .lg-fold { pointer-events: auto; background: var(--bg); padding: 2px 6px; }
+@media (max-width: 760px) { .layout { grid-template-columns: 1fr; grid-template-rows: minmax(360px, 1fr) auto; } }
+#view { position: relative; min-height: 320px; overflow: hidden; }
+#view canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+#view canvas.dragging { cursor: grabbing; }
+#view canvas.pointing { cursor: pointer; }
+aside { overflow-y: auto; font-size: calc(11.5px * var(--fs, 1)); color: var(--ink-2); padding-bottom: 16px; }
+aside h2 { font-size: calc(11px * var(--fs, 1)); font-weight: 500; color: var(--ink); margin: 18px 0 4px; }
+aside h2:first-of-type { margin-top: 10px; }
+.lg-fold { font: inherit; font-size: calc(11px * var(--fs, 1)); color: var(--ink-2); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+.lg-row { display: flex; align-items: center; gap: 8px; min-height: calc(22px * var(--fs, 1)); }
+.lg-row canvas { flex: none; }
+.lg-row.live { cursor: default; }
+.lg-row.live:hover span { color: var(--ink); }
+.lg-step { align-items: baseline; min-height: 0; padding: 2px 0; cursor: pointer; }
+.lg-step i { flex: none; width: 14px; display: inline-block; transform: translateY(-3px); }
+.lg-area { font: inherit; color: var(--ink-2); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; display: block; margin: 2px 0; }
+.lg-area:hover { color: var(--ink); }
+.lg-links { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.lg-links a { color: var(--ink); }
+.lg-text { margin-top: 10px; align-items: baseline; }
+.lg-text a { text-decoration: none; color: var(--ink-2); }
+.lg-text a:hover { color: var(--ink); }
+.lg-text .on { color: var(--ink); border-bottom: 1px solid var(--ink); }
+.zoom { position: absolute; right: 0; bottom: 0; display: flex; align-items: center; background: var(--bg); border: 1px solid var(--ink-3); font: 11px "IBM Plex Mono", monospace; }
+.zoom button { font: inherit; font-size: 13px; width: 30px; height: 28px; border: 0; background: none; color: var(--ink); cursor: pointer; }
+.zoom span { min-width: 46px; text-align: center; color: var(--ink-2); }
+#drop { position: absolute; inset: 0; display: none; place-content: center; text-align: center; gap: 10px; color: var(--ink-2); font-size: 13px; padding: 16px; }
+#drop.show { display: grid; }
+#drop code { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink); }
+.tip { position: fixed; pointer-events: none; z-index: 20; background: var(--bg); color: var(--ink); border: 1px solid var(--ink-3); padding: 6px 8px; font-size: calc(12px * var(--fs, 1)); line-height: 1.4; max-width: calc(340px * var(--fs, 1)); opacity: 0; }
+.tip .t-name { font-weight: 500; }
+.tip .t-desc { margin: 3px 0; }
+.tip.pinned { pointer-events: auto; user-select: text; }
+.tip .t-pins { margin-top: 3px; }
+.tip .t-pn, .tip .t-pins, .tip .t-net { font-family: "IBM Plex Mono", monospace; font-size: calc(10.5px * var(--fs, 1)); color: var(--ink-2); }
+</style>
+</head>
+<body>
+<header>
+  <h1>MYND main board — circuit</h1>
+  <input id="find" list="finds" placeholder="find part or net" autocomplete="off" spellcheck="false"><datalist id="finds"></datalist>
+  <a href="board3d.html" target="mynd-board3d">3D board</a> <a href="index.html">side by side</a>
+  <span id="status">loading…</span>
+</header>
+<div class="layout">
+  <div id="view">
+    <canvas id="cv"></canvas>
+    <div class="zoom"><button id="zout" title="zoom out">−</button><span id="zpct">100%</span><button id="zin" title="zoom in">+</button><button id="zfit" title="fit (F)">⤢</button></div>
+    <div id="drop">
+      <div>The circuit data could not be fetched. Open this page through a local server:</div>
+      <div><code>cd Viewer && python3 -m http.server 8000</code> → <code>http://localhost:8000/schematic.html</code></div>
+      <div>After editing the KiCad project: <code>Viewer/tools/build.sh</code></div>
+    </div>
+  </div>
+  <aside id="legend"></aside>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+"use strict";
+// =====================================================================
+// View settings, as in Schematik's circuit pages
+// The default view is Schematik's ?color=multi&width=3&uniform=1&text=big.
+// ?color=ink for single ink, ?width=1.1 for thin lines, ?uniform=0 for heavier supplies, ?text=normal|giant, ?select=R32C or a net name, ?area=U_MCU
+// =====================================================================
+const QS = new URLSearchParams(location.search);
+const MULTI = !["ink", "single", "mono"].includes(QS.get("color"));
+const LW = Math.min(8, Math.max(0.5, parseFloat(QS.get("width")) || 3));
+const UNIFORM = QS.get("uniform") !== "0";
+const TEXTSCALE = { normal: 1, big: 1.3, giant: 1.65 }[(QS.get("text") || "big").toLowerCase()] || 1.3;
+const NAMESCALE = 1 + (TEXTSCALE - 1) * 0.6;
+document.documentElement.style.setProperty("--fs", TEXTSCALE);
+// symbols and outlines take the signal weight up to 2 px, then grow half as fast, so parts stay part of the lines
+const GW = LW <= 2 ? Math.max(1.3, LW) : 2 + (LW - 2) / 2;
+const RH = Math.max(4.5, 2.5 + GW), CG = Math.max(3, 1.5 + GW * 0.75);
+// Schematik draws on a 20 px grid; KiCad on 2.54 mm. One Schematik pixel is this many millimetres:
+const K = 2.54 / 20;
+// When each kind of text appears, like the labels of a map. The unit is r: screen pixels per Schematik pixel (K × zoom),
+// an absolute scale, so a bigger schematic keeps the same steps. On this board, in a typical window, "fit" ≈ 100 % and
+// r 1 ≈ 590 %:  400 % ≈ 0.68 · 600 % ≈ 1.0 · 800 % ≈ 1.35 · 1000 % ≈ 1.7. Adjust here.
+const SHOW_AT = {
+  title: 0.45,     // chip, connector and area-box names
+  tag:   0.68,     // net names at the end of lines (≈ 400 %)
+  pin:   1.0,      // pin names inside chips and connectors (≈ 600 %)
+  value: 1.35,     // a part's value (100n, 10k) — or its designator when it has no value to show (TP30M, ESD2C) (≈ 800 %)
+  ref:   1.7,      // the designator as well (≈ 1000 %)
+};
+// text keeps its size on screen up to r = 1, then grows with the drawing up to this factor (and re-fits what was cut)
+const GROW_MAX = 1.6;
+
+const DATA_URL = QS.get("data") || "mynd_main.sch.json";
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d"), view = document.getElementById("view");
+const tip = document.getElementById("tip"), status = document.getElementById("status");
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let INK = {};
+const readInk = () => { INK = { ink: css("--ink"), ink2: css("--ink-2"), ink3: css("--ink-3"), bg: css("--bg"), ghost: css("--ghost") }; };
+readInk();
+
+let D = null;
+const cam = { s: 1, x: 0, y: 0 };      // screen px = world mm × s + offset
+let W = 0, H = 0, DPR = 1;
+
+// ---------------------------------------------------------------------
+// Nets: colour group, weight, tag text
+// ---------------------------------------------------------------------
+const group = n => n >= 0 ? D.netMeta.groups[D.netMeta.nets[n][1]] : null;
+const isGround = n => n >= 0 && D.netMeta.nets[n][1] === 0;
+const isPower = n => { const g = group(n); return !!(g && g[2]); };
+const weight = n => !UNIFORM && isPower(n) ? LW * 1.6 : LW;           // px
+const netColor = n => MULTI && n >= 0 && !isGround(n) ? group(n)[0] : INK.ink;
+const shortName = n => n >= 0 ? D.netMeta.nets[n][0] : "";
+const resolve = tok => typeof tok === "number" ? netColor(tok) : INK[tok] || tok;
+// rails that reach almost everything do not make parts "one connection away" (used for the 3D view)
+const isRail = n => isPower(n) || (D.netParts.get(n) || new Set()).size > 12;
+
+// ---------------------------------------------------------------------
+// Glyphs (Schematik's, in its pixel units), drawn along +x around 0; the caller places and turns them.
+// A glyph is a list of primitives: { pts | circle, closed, stroke, fill, w (px), role, net, z }
+// role: "lead" (keeps its wire's colour and weight), "body", "net"
+// ---------------------------------------------------------------------
+const P = (pts, o) => ({ pts, ...o });
+const body = (pts, o = {}) => P(pts, { stroke: "ink", w: GW, role: "body", z: 2, ...o });
+const lead = (pts, net) => P(pts, { stroke: net, w: weight(net), role: "lead", net, z: 1 });
+// half extent of each two-pin glyph along its axis (where the leads stop) and across it (for label room)
+const ALONG = { r: 15, c: CG, l: 9, fb: 9, d: 5, tvs: 10 };
+const HALF = { r: RH + GW / 2, c: 8 + GW / 2, l: 5 + GW / 2, fb: RH + GW / 2, d: 6 + GW / 2, tvs: 6 + GW / 2, nfet: 22, pfet: 22, tp: 4 };
+function glyph2(kind) {
+  const g = [];
+  if (kind === "r") g.push(body([-15, -RH, 15, -RH, 15, RH, -15, RH], { closed: true, fill: "bg" }));        // 1 : 3
+  else if (kind === "c") { g.push(body([-CG, -8, -CG, 8]), body([CG, -8, CG, 8])); }
+  else if (kind === "l") { const pts = []; for (let k = 0; k < 3; k++) for (let i = 0; i <= 8; i++) { const a = Math.PI - Math.PI * i / 8; pts.push(-9 + 6 * k + 3 + 3 * Math.cos(a), -4 * Math.sin(a)); } g.push(body(pts)); }
+  else if (kind === "fb") g.push(body([-9, -RH, 9, -RH, 9, RH, -9, RH], { closed: true, fill: "ink" }));
+  else if (kind === "d") g.push(body([-5, -6, -5, 6, 5, 0], { closed: true, fill: "ink" }), body([5, -6, 5, 6]));
+  else if (kind === "tvs") g.push(body([-10, -6, -10, 6, 0, 0], { closed: true, fill: "ink" }), body([10, -6, 10, 6, 0, 0], { closed: true, fill: "ink" }), body([0, -6, 0, 6]));
+  return g;
+}
+// transistor: drain at the top (−y), source at the bottom, gate plate on the left; m = 1
+function fetGlyph(type) {
+  const g = [], ch = -16;
+  g.push(body([-22, -14, -22, 14]));
+  for (const [a, b] of [[-20, -11], [-4.5, 4.5], [11, 20]]) g.push(body([ch, a, ch, b]));
+  g.push(body([ch, -16, 0, -16]), body([ch, 16, 0, 16]), body([ch, 0, 0, 0, 0, 16]));
+  const [tip, base] = type === "pfet" ? [ch + 11, ch + 4] : [ch + 1, ch + 8];
+  g.push(body([tip, 0, base, -3.5, base, 3.5], { closed: true, fill: "ink" }));
+  return g;
+}
+function groundGlyph(x0, net) {          // bars across the axis, starting at x0
+  const d = Math.max(2.5, GW * 1.4), w = Math.max(5, GW * 2.2);
+  return [[0, 1], [1, 0.6], [2, 0.2]].map(([k, f]) => P([x0 + k * d, -w * f, x0 + k * d, w * f], { stroke: "ink", w: GW, role: "net", net, z: 2 }));
+}
+
+// ---------------------------------------------------------------------
+// Build: data → primitives and texts in world millimetres, per area
+// ---------------------------------------------------------------------
+const PRIMS = [];          // { a: area, path: Path2D, mode, stroke, fill, w, role, net, part, z, box }
+const TEXTS = [];          // { a, s, x, y, px, face, align, base, angle, col, role, net, part }
+function place(prims, ox, oy, ux, uy, area, part) {
+  // local px → world: origin + K·(x·u + y·v), v = u turned 90° (so +y stays "down" for u = +x)
+  const vx = -uy, vy = ux;
+  for (const p of prims) {
+    const path = new Path2D(), box = [Infinity, Infinity, -Infinity, -Infinity];
+    const at = (x, y) => { const X = ox + K * (x * ux + y * vx), Y = oy + K * (x * uy + y * vy); box[0] = Math.min(box[0], X); box[1] = Math.min(box[1], Y); box[2] = Math.max(box[2], X); box[3] = Math.max(box[3], Y); return [X, Y]; };
+    if (p.circle) { const [X, Y] = at(p.circle[0], p.circle[1]), r = p.circle[2] * K; path.moveTo(X + r, Y); path.arc(X, Y, r, 0, Math.PI * 2); box[0] = X - r; box[1] = Y - r; box[2] = X + r; box[3] = Y + r; }
+    else { for (let i = 0; i < p.pts.length; i += 2) { const [X, Y] = at(p.pts[i], p.pts[i + 1]); i ? path.lineTo(X, Y) : path.moveTo(X, Y); } if (p.closed) path.closePath(); }
+    PRIMS.push({ a: area, path, stroke: p.stroke, fill: p.fill, w: p.w, role: p.role, net: p.net ?? -1, part, z: p.z ?? 1, box });
+  }
+}
+// a world-coordinate polyline or circle (wires, KiCad body shapes)
+function worldPrim(area, pts, o, part) {
+  const path = new Path2D(), box = [Infinity, Infinity, -Infinity, -Infinity];
+  if (o.circle) { const [x, y, r] = o.circle; path.moveTo(x + r, y); path.arc(x, y, r, 0, Math.PI * 2); box.splice(0, 4, x - r, y - r, x + r, y + r); }
+  else for (let i = 0; i < pts.length; i += 2) { i ? path.lineTo(pts[i], pts[i + 1]) : path.moveTo(pts[i], pts[i + 1]); box[0] = Math.min(box[0], pts[i]); box[1] = Math.min(box[1], pts[i + 1]); box[2] = Math.max(box[2], pts[i]); box[3] = Math.max(box[3], pts[i + 1]); }
+  if (o.closed) path.closePath();
+  PRIMS.push({ a: area, path, stroke: o.stroke, fill: o.fill, w: o.w, role: o.role, net: o.net ?? -1, part, z: o.z ?? 1, box, cap: o.cap });
+}
+const PX = { pin: 9, val: 9, tag: 9, name: 11.5, pn: 9, area: 13 };
+function text(area, s, x, y, o) { TEXTS.push({ a: area, s, x, y, angle: 0, align: "left", base: "middle", col: "ink", role: "body", net: -1, lvl: "pin", ...o, px: (o.px || 9) * (o.face === "name" ? NAMESCALE : TEXTSCALE) }); }
+// cut a text to n characters with an ellipsis (the tooltip has it all)
+const fitStr = (t, n) => t.length > n ? t.slice(0, Math.max(1, n - 1)).trimEnd() + "…" : t;
+const monoW = (s, px) => String(s).replace(/[~_^]\{([^}]*)\}/g, "$1").length * px * 0.6 * TEXTSCALE * K;   // IBM Plex Mono: 0.6 em per character
+
+// what a part's label says: its value where it has one (10k, 100n), else its designator (TP30M, ESD2C); the designator second
+const HAS_VALUE = new Set(["r", "c", "l", "fb"]);
+function labelLines(k, ref, v) {
+  if (HAS_VALUE.has(k) && v) return { lines: [short(v), ref], lvls: ["value", "ref"] };
+  return { lines: [ref], lvls: ["value"] };
+}
+// ohms from a value like 0R, 4.7R, 10k, 2.2M, 0.005R (NaN when it is not a resistance)
+function ohms(v) { const m = String(v || "").trim().match(/^([\d.]+)\s*([RkKM]?)([\d]*)/); if (!m) return NaN; const mult = { "": 1, R: 1, k: 1e3, K: 1e3, M: 1e6 }[m[2]]; return parseFloat(m[1] + (m[3] ? "." + m[3] : "")) * mult; }
+const notFitted = v => /^(NC|DNP|DNF|not ?fitted)$/i.test(String(v || "").trim());
+const short = v => String(v || "").replace(/\s/g, "").replace(/uF$/i, "µ").replace(/µF$/, "µ").replace(/nF$/i, "n").replace(/pF$/i, "p").replace(/uH$/i, "µH").replace(/^NC$/, "not fitted");
+const OBST = [];           // per area: rectangles that labels must not touch
+function build() {
+  const t0 = performance.now();
+  D.netParts = new Map(); D.partNets = new Map(); D.byRef = new Map(); D.netIndex = new Map(D.nets.map((n, i) => [n, i]));
+  const LABELS = [];
+  D.areas.forEach((A, ai) => {
+    const ox = A.ox, oy = A.oy, ob = OBST[ai] = [];
+    const wx = x => x + ox, wy = y => y + oy;
+    A.box = [A.bb[0] + ox, A.bb[1] + oy, A.bb[2] + ox, A.bb[3] + oy];
+    // wires, with square ends like Schematik's lines
+    for (const w of A.wires) { worldPrim(ai, [wx(w[0]), wy(w[1]), wx(w[2]), wy(w[3])], { stroke: w[4], w: weight(w[4]), role: "net", net: w[4], z: 0, cap: "square" });
+      const h = weight(w[4]) * K / 2 + K; ob.push([Math.min(wx(w[0]), wx(w[2])) - h, Math.min(wy(w[1]), wy(w[3])) - h, Math.max(wx(w[0]), wx(w[2])) + h, Math.max(wy(w[1]), wy(w[3])) + h]); }
+    // a test point on a line needs no junction dot: its circle already says it is there
+    const tpAt = new Set(A.parts.filter(q => /^TP\d/.test(q.r)).flatMap(q => q.p.map(p => Math.round(p[0] * 100) + "," + Math.round(p[1] * 100))));
+    for (const j of A.junctions) { if (tpAt.has(Math.round(j[0] * 100) + "," + Math.round(j[1] * 100))) continue; const r = Math.max(2.4, weight(j[2]) * 0.9 + 1) * K; worldPrim(ai, null, { circle: [wx(j[0]), wy(j[1]), r], fill: j[2], role: "net", net: j[2], z: 3 }); }
+    for (const [x, y] of A.nc) { const r = 3 * K; worldPrim(ai, [wx(x) - r, wy(y) - r, wx(x) + r, wy(y) + r], { stroke: "ink3", w: 1.2, role: "body", z: 1 }); worldPrim(ai, [wx(x) + r, wy(y) - r, wx(x) - r, wy(y) + r], { stroke: "ink3", w: 1.2, role: "body", z: 1 }); }
+    // net names where a line stops (KiCad labels): just the name, in the line's colour, continuing the line:
+    // after its end, centred on it, so it is never unclear which line a name belongs to
+    const named = [];
+    for (const L of A.labels) {
+      const s = shortName(L.n) || L.s; if (!s) continue;
+      const x = wx(L.x), y = wy(L.y), off = 3 * K, hh = PX.tag * K * TEXTSCALE, wdt = monoW(s, PX.tag);
+      if (named.some(q => q.n === L.n && Math.hypot(q.x - x, q.y - y) < 1)) continue;          // the same name twice on one spot
+      named.push({ n: L.n, x, y });
+      const at = (px, py) => Math.abs(px - L.x) < 0.01 && Math.abs(py - L.y) < 0.01;
+      const ending = A.wires.filter(w => w[4] === L.n && (at(w[0], w[1]) || at(w[2], w[3])));
+      const through = A.wires.some(w => w[4] === L.n && !at(w[0], w[1]) && !at(w[2], w[3]) && segDist(L.x, L.y, w[0], w[1], w[2], w[3]) < 0.01);
+      let out = null;
+      if (ending.length === 1 && !through) { const w = ending[0], fx = at(w[0], w[1]) ? w[2] : w[0], fy = at(w[0], w[1]) ? w[3] : w[1]; out = [Math.sign(L.x - fx), Math.sign(L.y - fy)]; }
+      else if (!ending.length && !through) {           // straight on a pin: the way the pin points
+        for (const q of A.parts) for (const p of q.p) if (at(p[0], p[1]) && p[8] !== -1) out = [Math.sign(p[0] - p[5]), Math.sign(p[1] - p[6])];
+      }
+      const o = { px: PX.tag, face: "mono", col: L.n, role: "net", net: L.n, lvl: "tag", base: "middle" };
+      if (out && out[0]) {
+        text(ai, s, x + out[0] * off, y, { ...o, align: out[0] > 0 ? "left" : "right" });
+        ob.push(out[0] > 0 ? [x, y - hh / 2, x + off + wdt, y + hh / 2] : [x - off - wdt, y - hh / 2, x, y + hh / 2]);
+      } else if (out && out[1]) {
+        text(ai, s, x, y + out[1] * off, { ...o, angle: 90, align: out[1] < 0 ? "left" : "right" });
+        ob.push(out[1] < 0 ? [x - hh / 2, y - off - wdt, x + hh / 2, y] : [x - hh / 2, y, x + hh / 2, y + off + wdt]);
+      } else {
+        // in the middle of a line or at a junction: on top of the line, as KiCad draws it
+        const vert = L.a === 90, run = L.h < 0 ? 1 : -1;
+        text(ai, s, vert ? x - off : x, vert ? y : y - off, { ...o, base: "alphabetic", angle: vert ? 90 : 0, align: run > 0 ? "left" : "right" });
+        if (!vert) ob.push(run > 0 ? [x, y - hh - off, x + wdt, y] : [x - wdt, y - hh - off, x, y]);
+      }
+    }
+    // sheet symbols on the root: a box that stands for another area
+    for (const e of A.sheets) {
+      const x0 = wx(e.x), y0 = wy(e.y), x1 = x0 + e.w, y1 = y0 + e.h, target = D.areas[e.target];
+      worldPrim(ai, [x0, y0, x1, y0, x1, y1, x0, y1], { closed: true, stroke: "ink", fill: "bg", w: GW, role: "sheet", z: 2 }, "area:" + e.target);
+      text(ai, target ? target.title : e.name, x0, y0 - 4 * K, { lvl: "title", px: PX.name, face: "name", base: "alphabetic", role: "sheet", part: "area:" + e.target });
+      for (const p of e.pins) text(ai, shortName(p.n) || p.s, wx(p.tx), wy(p.ty), { px: PX.pin, face: "mono", col: "ink2", angle: p.a, align: p.h < 0 ? "left" : "right", role: "lead", net: p.n, part: "area:" + e.target });
+      ob.push([x0, y0, x1, y1]);
+    }
+    for (const part of A.parts) {
+      const ref = part.r;
+      if (part.pwr !== undefined) {
+        const pin = part.p[0], n = pin[4], [dx, dy] = part.dir, x = wx(pin[0]), y = wy(pin[1]);
+        if (part.gnd) { place([P([0, 0, 4, 0], { stroke: n, w: weight(n), role: "net", net: n, z: 1 }), ...groundGlyph(4, n)], x, y, dx, dy, ai, null); ob.push([x - 7 * K, y - 7 * K, x + 7 * K, y + 7 * K].map((v, i) => v + (i % 2 ? dy : dx) * 5 * K)); }
+        else {
+          place([P([0, 0, 8, 0], { stroke: n, w: weight(n), role: "net", net: n, z: 1 })], x, y, dx, dy, ai, null);
+          const s = shortName(n) || part.pwr, ex = x + dx * 10 * K, ey = y + dy * 10 * K;
+          text(ai, s, ex, ey + (dy ? dy * 3 * K : 0), { lvl: "tag", px: PX.tag, face: "mono", col: n, role: "net", net: n, align: dx > 0 ? "left" : dx < 0 ? "right" : "center", base: dy < 0 ? "alphabetic" : dy > 0 ? "top" : "middle" });
+          const wdt = monoW(s, PX.tag); ob.push([ex - wdt / 2 - 2 * K, ey - 12 * K, ex + wdt / 2 + 2 * K, ey + 12 * K]);
+        }
+        continue;
+      }
+      const info = D.parts[ref] || {};
+      const pn = D.partNets.get(ref) || D.partNets.set(ref, new Set()).get(ref);
+      for (const p of part.p) if (p[4] >= 0) { pn.add(p[4]); (D.netParts.get(p[4]) || D.netParts.set(p[4], new Set()).get(p[4])).add(ref); }
+      const k = part.k, rec = { ref, area: ai, part, box: null };
+      (D.byRef.get(ref) || D.byRef.set(ref, []).get(ref)).push(rec);
+      const first = PRIMS.length;
+      if (ALONG[k] !== undefined) {
+        // two-pin glyph centred between the pins, leads in the colour of each pin's net
+        let [a, b] = part.p; if (a[0] > b[0] + 0.01 || (Math.abs(a[0] - b[0]) < 0.01 && a[1] > b[1])) [a, b] = [b, a];
+        const ax = wx(a[0]), ay = wy(a[1]), bx = wx(b[0]), by = wy(b[1]), L = Math.hypot(bx - ax, by - ay) || 1, ux = (bx - ax) / L, uy = (by - ay) / L;
+        const cx = (ax + bx) / 2, cy = (ay + by) / 2, half = L / 2 / K, al = ALONG[k];
+        let g = glyph2(k), al2 = al;
+        // diodes point at the cathode
+        if (k === "d" && /^K$/i.test(a[3])) g = g.map(q => ({ ...q, pts: q.pts.map((v, i) => i % 2 ? v : -v) }));
+        // a low-value resistor (below 100 Ω) is shorter (1 : 2 instead of 1 : 3), just as wide; a 0 Ω one is a link,
+        // so the line runs through it
+        const om = k === "r" ? ohms(info.v) : NaN, through = [];
+        if (om < 100) { g = g.map(q => ({ ...q, pts: q.pts.map((v, i) => i % 2 ? v : v * 2 / 3) })); al2 = al * 2 / 3;
+          if (om === 0) through.push({ ...lead([-al2, 0, 0, 0], a[4]), z: 3 }, { ...lead([0, 0, al2, 0], b[4]), z: 3 }); }
+        place([lead([-half, 0, -al2, 0], a[4]), lead([al2, 0, half, 0], b[4]), ...g, ...through], cx, cy, ux, uy, ai, ref);
+        const horiz = Math.abs(ux) > Math.abs(uy);
+        const hh = HALF[k] * K, ll = (al + 2) * K;
+        ob.push(horiz ? [cx - ll, cy - hh, cx + ll, cy + hh] : [cx - hh, cy - ll, cx + hh, cy + ll]);
+        LABELS.push({ area: ai, ref, cx, cy, horiz, hh: HALF[k], ...labelLines(k, ref, info.v) });
+      } else if (k === "nfet" || k === "pfet") {
+        const named = nm => part.p.filter(p => p[8] !== -1 && p[3].split("/").includes(nm)), G = named("G")[0], Ds = named("D"), Ss = named("S");
+        const avg = (ps, i) => ps.reduce((s, p) => s + p[i], 0) / ps.length;
+        const dX = wx(avg(Ds, 0)), dY = wy(avg(Ds, 1)), sX = wx(avg(Ss, 0)), sY = wy(avg(Ss, 1));
+        // drain → source, snapped to the grid (pin groups of different sizes would tilt it)
+        let ey = Math.abs(sX - dX) > Math.abs(sY - dY) ? [Math.sign(sX - dX), 0] : [0, Math.sign(sY - dY) || 1];
+        // ex points away from the gate
+        let ex = [-ey[1], ey[0]]; const gX = wx(G[0]), gY = wy(G[1]);
+        const all = [...Ds, ...Ss], colX = all.reduce((s, p) => s + (wx(p[0]) * ex[0] + wy(p[1]) * ex[1]), 0) / all.length;
+        if ((gX * ex[0] + gY * ex[1]) > colX) ex = [-ex[0], -ex[1]];
+        const colE = all.reduce((s, p) => s + (wx(p[0]) * ex[0] + wy(p[1]) * ex[1]), 0) / all.length;
+        const gE = gX * ey[0] + gY * ey[1];
+        // origin: on the drain–source column, level with the gate
+        const ox0 = ex[0] * colE + ey[0] * gE, oy0 = ex[1] * colE + ey[1] * gE;
+        const loc = (X, Y) => [((X - ox0) * ex[0] + (Y - oy0) * ex[1]) / K, ((X - ox0) * ey[0] + (Y - oy0) * ey[1]) / K];
+        const prims = fetGlyph(k);
+        const [gx] = loc(gX, gY); prims.push(lead([gx, 0, -22, 0], G[4]));
+        for (const [pins, end] of [[Ds, -16], [Ss, 16]]) {
+          const ls = pins.map(p => loc(wx(p[0]), wy(p[1]))), row = ls.reduce((s, q) => s + q[1], 0) / ls.length;
+          const xs = [0, ...ls.map(q => q[0])];
+          prims.push(lead([0, end, 0, row], pins[0][4]));
+          if (Math.max(...xs) - Math.min(...xs) > 0.5) prims.push(lead([Math.min(...xs), row, Math.max(...xs), row], pins[0][4]));
+        }
+        // stand-in: ex is "x", ey is "y" (not a rotation when mirrored, so place by hand)
+        for (const p of prims) {
+          const path = new Path2D(), box = [Infinity, Infinity, -Infinity, -Infinity];
+          for (let i = 0; i < p.pts.length; i += 2) { const X = ox0 + K * (p.pts[i] * ex[0] + p.pts[i + 1] * ey[0]), Y = oy0 + K * (p.pts[i] * ex[1] + p.pts[i + 1] * ey[1]);
+            i ? path.lineTo(X, Y) : path.moveTo(X, Y); box[0] = Math.min(box[0], X); box[1] = Math.min(box[1], Y); box[2] = Math.max(box[2], X); box[3] = Math.max(box[3], Y); }
+          if (p.closed) path.closePath();
+          PRIMS.push({ a: ai, path, stroke: p.stroke, fill: p.fill, w: p.w, role: p.role, net: p.net ?? -1, part: ref, z: p.z ?? 1, box });
+        }
+        const cxF = ox0 - ex[0] * 10 * K, cyF = oy0 - ex[1] * 10 * K, horiz = Math.abs(ey[1]) > Math.abs(ey[0]);
+        ob.push([cxF - 16 * K, cyF - 22 * K, cxF + 16 * K, cyF + 22 * K].map((v, i) => v));
+        LABELS.push({ area: ai, ref, cx: ox0 + ex[0] * 4 * K, cy: oy0 + ex[1] * 4 * K, horiz: !horiz, hh: 22, lines: [ref, info.v || ""], lvls: ["value", "ref"], fet: true });
+      } else if (k === "tp") {
+        const p = part.p[0], x = wx(p[0]), y = wy(p[1]), dx = p[5] - p[0], dy = p[6] - p[1], l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l;
+        const len = Math.max(l / K, 4);
+        place([lead([0, 0, len, 0], p[4]), P(null, { circle: [len + 3.5, 0, 3.5], stroke: "ink", fill: "bg", w: GW, role: "body", z: 2 })], x, y, ux, uy, ai, ref);
+        // the name: after the circle, continuing its line (as net names do) when the line runs sideways and that spot is free;
+        // otherwise at the top right of the circle. Always one of those two, so it is clear which test point it names.
+        const tcx = x + ux * (len + 3.5) * K, tcy = y + uy * (len + 3.5) * K, rr = 3.5 * K, gap = 3 * K;
+        const tw = monoW(ref, PX.val), th = PX.val * TEXTSCALE * K;
+        const free = q => !ob.some(o => q[0] < o[2] && q[2] > o[0] && q[1] < o[3] && q[3] > o[1]);
+        let spot = null;
+        if (Math.abs(ux) > 0.5) {
+          const sx = tcx + Math.sign(ux) * (rr + gap), q = ux > 0 ? [sx, tcy - th / 2, sx + tw, tcy + th / 2] : [sx - tw, tcy - th / 2, sx, tcy + th / 2];
+          if (free(q)) spot = { x: sx, y: tcy, align: ux > 0 ? "left" : "right", base: "middle", rect: q };
+        }
+        if (!spot) { const sx = tcx + rr * 0.7, sy = tcy - rr * 0.7; spot = { x: sx, y: sy, align: "left", base: "alphabetic", rect: [sx, sy - th, sx + tw, sy] }; }
+        text(ai, ref, spot.x, spot.y, { px: PX.val, face: "mono", col: "ink", align: spot.align, base: spot.base, part: ref, lvl: "value" });
+        ob.push(spot.rect);
+        ob.push([x + ux * len * K - 4 * K, y + uy * len * K - 4 * K, x + ux * (len + 7) * K + 4 * K, y + uy * (len + 7) * K + 4 * K].map((v, i, a) => v));
+      } else {
+        // a box: KiCad's outline in Schematik's weight, pins as leads, names inside, title above
+        let bodyBox = null, area = 0;
+        for (const g of part.g) {
+          if (g[0] === "C") { worldPrim(ai, null, { circle: [wx(g[3]), wy(g[4]), g[5]], stroke: "ink", fill: g[2] === 1 ? "ink" : null, w: GW, role: "body", z: 2 }, ref); continue; }
+          const pts = g[3].map((v, i) => i % 2 ? wy(v) : wx(v)), closed = pts.length >= 8 && Math.abs(pts[0] - pts[pts.length - 2]) < 0.01 && Math.abs(pts[1] - pts[pts.length - 1]) < 0.01;
+          worldPrim(ai, pts, { stroke: "ink", fill: g[2] === 1 ? "ink" : closed ? "bg" : null, w: GW, role: "body", z: 2, closed }, ref);
+          if (closed) { const xs = pts.filter((_, i) => i % 2 === 0), ys = pts.filter((_, i) => i % 2); const b = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], ar = (b[2] - b[0]) * (b[3] - b[1]); if (ar > area) { area = ar; bodyBox = b; } }
+        }
+        for (const p of part.p) if (!p[7] && p[8] !== -1) worldPrim(ai, [wx(p[0]), wy(p[1]), wx(p[5]), wy(p[6])], { stroke: p[4], w: weight(p[4]), role: "lead", net: p[4], z: 1 }, ref);
+        for (const t of part.t) text(ai, t[0], wx(t[1]), wy(t[2]), { px: PX.pin, face: "mono", col: "ink2", angle: t[4], align: t[5] < 0 ? "left" : t[5] > 0 ? "right" : "center", base: "middle", part: ref });
+        const b = bodyBox || [wx(part.b[0]), wy(part.b[1]), wx(part.b[2]), wy(part.b[3])];
+        ob.push(b);
+        // title hangs above the outline: name lines, then part number; the ref on the right
+        const lines = String(part.name || info.v || "").split("\n"), LS = 12 * NAMESCALE * K;
+        // above the outline, never wider than it (Schematik's fitText): the name, then "ref  part number"; the tooltip has it all
+        // the room for the title: from the box's left edge to the first wire, part or label in the title's band above it
+        // (not just the box width), so it is only wrapped or cut where something is really in the way
+        const bandH = 3 * 12 * NAMESCALE * K + 11 * TEXTSCALE * K, band = [b[0], b[1] - bandH, b[0] + 50, b[1] - 0.2];
+        let right = Math.max(b[2], b[0] + 50);
+        const others = A.parts.filter(q => q !== part && q.pwr === undefined).map(q => [wx(q.b[0]), wy(q.b[1]), wx(q.b[2]), wy(q.b[3])]);
+        for (const o of [...ob, ...others]) if (o[1] < band[3] && o[3] > band[1] && o[2] > b[0] + 0.5 && o[0] < right) right = Math.max(b[2], o[0] - 1);
+        const roomMM = right - b[0];
+        const room = roomMM / K, monoCh = 0.6 * 9 * TEXTSCALE, fit = (t, n) => t.length > n ? t.slice(0, Math.max(1, n - 1)).trimEnd() + "…" : t;
+        const pnRoom = Math.floor(room / monoCh) - ref.length - 1;
+        let ty = b[1] - 4 * K - 11 * TEXTSCALE * K, dy = -11 * TEXTSCALE;
+        text(ai, ref, b[0], b[1] - 4 * K, { px: PX.val, face: "mono", col: "ink", base: "alphabetic", part: ref, lvl: "ref" });
+        if (part.pn) text(ai, fit(part.pn, Math.max(3, pnRoom)), b[0], b[1] - 4 * K, { dx: (ref.length + 1) * monoCh, px: PX.pn, face: "mono", col: "ink2", base: "alphabetic", part: ref, lvl: "value", full: part.pn, room: roomMM, cw: 0.6 });
+        const nameCh = Math.max(6, Math.floor(room / (0.56 * 11.5 * NAMESCALE)));
+        // wrap the name on words to the box width; only a single word longer than that is cut
+        const wrapped = []; for (const l of lines) { let cur = ""; for (const w of l.split(/\s+/)) { if (cur && (cur + " " + w).length > nameCh) { wrapped.push(cur); cur = w; } else cur = cur ? cur + " " + w : w; } if (cur) wrapped.push(cur); }
+        lines.splice(0, lines.length, ...wrapped);
+        for (let i = lines.length - 1; i >= 0; i--, ty -= LS, dy -= 12 * NAMESCALE) text(ai, fit(lines[i], nameCh), b[0], b[1] - 4 * K, { dy, px: PX.name, face: "name", base: "alphabetic", part: ref, lvl: "title", full: lines[i], room: roomMM, cw: 0.56 });
+        const used = Math.min(roomMM, Math.max(...lines.map(l => l.length * 0.56 * 11.5 * NAMESCALE * K), (ref.length + 1 + (part.pn || "").length) * monoCh * K));
+        ob.push([b[0], ty, b[0] + Math.max(used, b[2] - b[0]), b[1]]);
+      }
+      if (notFitted(info.v)) for (let i = first; i < PRIMS.length; i++) { const q = PRIMS[i]; if (q.stroke != null) q.stroke = "ghost"; if (q.fill != null && q.fill !== "bg") q.fill = "ghost"; }
+      rec.prims = [first, PRIMS.length];
+    }
+  });
+  placeLabels(LABELS);
+  // per part: a box for hit testing and flying to it
+  for (const recs of D.byRef.values()) for (const r of recs) {
+    const b = [Infinity, Infinity, -Infinity, -Infinity];
+    for (let i = r.prims[0]; i < r.prims[1]; i++) { const q = PRIMS[i].box; if (PRIMS[i].role === "lead") continue; b[0] = Math.min(b[0], q[0]); b[1] = Math.min(b[1], q[1]); b[2] = Math.max(b[2], q[2]); b[3] = Math.max(b[3], q[3]); }
+    r.box = isFinite(b[0]) ? b : [r.part.b[0] + D.areas[r.area].ox, r.part.b[1] + D.areas[r.area].oy, r.part.b[2] + D.areas[r.area].ox, r.part.b[3] + D.areas[r.area].oy];
+  }
+  for (const p of PRIMS) if (p.net >= 0 && isGround(p.net)) p.z -= 10;          // ground: the deepest layer, behind everything
+  D.extent = D.areas.reduce((b, A) => [Math.min(b[0], A.box[0]), Math.min(b[1], A.box[1] - 16), Math.max(b[2], A.box[2]), Math.max(b[3], A.box[3])], [Infinity, Infinity, -Infinity, -Infinity]);
+  batches();
+  console.info(`built ${PRIMS.length} shapes and ${TEXTS.length} texts in ${(performance.now() - t0).toFixed(0)} ms`);
+}
+
+// part labels go where they touch nothing: no wire, no symbol, no box, no other text (Schematik's placeLabels)
+// a label "between the lines" has a line just above and just below it (or just left and right of it): then it is not
+// clear which line it belongs to. Those spots come last.
+const UNIT = 2.54;
+function between(area, r) {
+  const A = D.areas[area], ox = A.ox, oy = A.oy, near = 0.9 * UNIT;
+  let up = false, down = false, left = false, right = false;
+  for (const w of A.wires) {
+    const x1 = Math.min(w[0], w[2]) + ox, x2 = Math.max(w[0], w[2]) + ox, y1 = Math.min(w[1], w[3]) + oy, y2 = Math.max(w[1], w[3]) + oy;
+    if (y1 === y2) {                                 // horizontal line under or over the text, across most of it
+      const over = Math.min(x2, r[2]) - Math.max(x1, r[0]); if (over < (r[2] - r[0]) * 0.3) continue;
+      if (y1 <= r[1] + 0.05 && y1 >= r[1] - near) up = true;
+      if (y1 >= r[3] - 0.05 && y1 <= r[3] + near) down = true;
+    } else if (x1 === x2) {                          // vertical line beside it
+      const over = Math.min(y2, r[3]) - Math.max(y1, r[1]); if (over < (r[3] - r[1]) * 0.5) continue;
+      if (x1 <= r[0] + 0.05 && x1 >= r[0] - near) left = true;
+      if (x1 >= r[2] - 0.05 && x1 <= r[2] + near) right = true;
+    }
+    if ((up && down) || (left && right)) return true;
+  }
+  return false;
+}
+function placeLabels(LABELS) {
+  const LH = 9 * TEXTSCALE * K, pad = 2 * K;
+  // a coarse grid per area so each test only looks at nearby obstacles
+  const CELLMM = 6, grids = OBST.map(list => { const g = new Map(); list.forEach(r => add(g, r)); return g; });
+  function add(g, r) { for (let i = Math.floor(r[0] / CELLMM); i <= Math.floor(r[2] / CELLMM); i++) for (let j = Math.floor(r[1] / CELLMM); j <= Math.floor(r[3] / CELLMM); j++) { const k = i + "," + j; (g.get(k) || g.set(k, []).get(k)).push(r); } }
+  const near = (g, r) => { const out = new Set(); for (let i = Math.floor(r[0] / CELLMM); i <= Math.floor(r[2] / CELLMM); i++) for (let j = Math.floor(r[1] / CELLMM); j <= Math.floor(r[3] / CELLMM); j++) for (const o of g.get(i + "," + j) || []) out.add(o); return out; };
+  for (const L of LABELS) {
+    const g = grids[L.area], lines = L.lines.filter(Boolean), one = lines.join(" ");
+    const w1 = monoW(one, 9), w2 = Math.max(...lines.map(s => monoW(s, 9)));
+    const { cx, cy } = L, c = [];
+    const two = (x, anc, y0) => ({ lines, x, anc, y0, rect: anc === "left" ? [x, y0 - LH + K, x + w2, y0 + LH + K] : [x - w2, y0 - LH + K, x, y0 + LH + K] });
+    const stack = (x, y0) => ({ lines, x, anc: "center", y0, rect: [x - w2 / 2, y0 - LH + K, x + w2 / 2, y0 + LH + K] });
+    const single = (x, anc, y) => ({ lines: [one], x, anc, y0: y, rect: anc === "center" ? [x - w1 / 2, y - LH + K, x + w1 / 2, y + 2 * K] : anc === "left" ? [x, y - LH + K, x + w1, y + 2 * K] : [x - w1, y - LH + K, x, y + 2 * K] });
+    const gap = 4 * K, hh = L.hh * K, up = cy - hh - gap, down = cy + hh + gap + 7 * TEXTSCALE * K, side = hh + gap, k = TEXTSCALE * K;
+    if (L.horiz) c.push(single(cx, "center", up), single(cx, "center", down), stack(cx, up - LH), stack(cx, down), single(cx - 13 * K, "left", up), single(cx + 13 * K, "right", up),
+                        single(cx - 13 * K, "left", down), single(cx + 13 * K, "right", down), single(cx, "center", up - 11 * k), single(cx, "center", down + 11 * k));
+    else c.push(two(cx + side, "left", cy - k), single(cx + side, "left", cy + 3 * k), two(cx - side, "right", cy - k), single(cx - side, "right", cy + 3 * k),
+                two(cx + side, "left", cy - 10 * k), two(cx + side, "left", cy + 8 * k), two(cx - side, "right", cy - 10 * k), two(cx - side, "right", cy + 8 * k),
+                two(cx + side, "left", cy - 19 * k), two(cx + side, "left", cy + 17 * k), two(cx - side, "right", cy - 19 * k), two(cx - side, "right", cy + 17 * k));
+    const hit = r => { let a = 0; for (const o of near(g, r)) a += Math.max(0, Math.min(r[2] + pad, o[2]) - Math.max(r[0] - pad, o[0])) * Math.max(0, Math.min(r[3] + pad, o[3]) - Math.max(r[1] - pad, o[1])); return a; };
+    // first choice: free and on the edge; then free, even between two lines; then the least covered
+    let pick = c.find(k => hit(k.rect) === 0 && !between(L.area, k.rect)) || c.find(k => hit(k.rect) === 0), best = Infinity;
+    if (!pick) for (const cand of c) { const a = hit(cand.rect); if (a < best) { best = a; pick = cand; } }
+    const lvls = L.lvls || L.lines.map(() => "value");
+    if (pick.lines.length === 1 && lines.length > 1) {
+      // one line, "10k R22C": the value at its level, the designator after it at the later one
+      text(L.area, lines[0], pick.x, pick.y0, { px: PX.val, face: "mono", col: "ink", align: pick.anc, base: "alphabetic", part: L.ref, lvl: lvls[0] });
+      if (pick.anc === "left") text(L.area, lines[1], pick.x, pick.y0, { dx: (lines[0].length + 1) * 0.6 * 9 * TEXTSCALE, px: PX.val, face: "mono", col: "ink2", align: "left", base: "alphabetic", part: L.ref, lvl: lvls[1] });
+    } else pick.lines.forEach((s, i) => text(L.area, s, pick.x, pick.y0, { dy: i * 9 * TEXTSCALE, px: PX.val, face: "mono", col: i === 0 ? "ink" : "ink2", align: pick.anc, base: "alphabetic", part: L.ref, lvl: lvls[i] || "value" }));
+    add(g, pick.rect);
+  }
+}
+
+// draw batches: one Path2D per area × style, so a frame is a few dozen fill and stroke calls
+let BATCH = [];
+function styleKey(p) { return `${p.z}|${p.stroke == null ? "" : resolve(p.stroke)}|${p.fill == null ? "" : resolve(p.fill)}|${p.w || 0}|${p.cap || ""}`; }
+function makeBatches(filter) {
+  const per = new Map();
+  for (const p of PRIMS) {
+    if (filter && !filter(p)) continue;
+    const key = p.a + "#" + styleKey(p);
+    let b = per.get(key); if (!b) per.set(key, b = { a: p.a, z: p.z, cap: p.cap || "butt", stroke: p.stroke == null ? null : resolve(p.stroke), fill: p.fill == null ? null : resolve(p.fill), w: (p.w || 0) * K, path: new Path2D() });
+    b.path.addPath(p.path);
+  }
+  return [...per.values()].sort((a, b) => a.z - b.z);
+}
+function batches() { BATCH = makeBatches(null); LIT = null; }
+
+// ---------------------------------------------------------------------
+// Focus (Schematik): the picked thing and what it touches stay, everything else fades to 15 %
+// part → the part and every net it touches; net → the net and every part on it
+// ---------------------------------------------------------------------
+let hover = null, pinned = null, LIT = null, litKey = "";
+const partSel = ref => ({ kind: "part", parts: new Set([ref]), nets: new Set(D.partNets.get(ref) || []), fromNet: false });
+const netSel = n => ({ kind: "net", nets: new Set([n]), parts: new Set(D.netParts.get(n) || []), fromNet: true });
+const groupSel = (nets, parts) => ({ kind: "group", nets: new Set(nets), parts: new Set(parts || []), fromNet: nets.length > 0 });
+const current = () => hover || pinned;
+const selKey = s => s ? s.kind + [...s.parts].join() + "|" + [...s.nets].join() : "";
+function litTest(sel, role, net, part) {
+  if (role === "net") return sel.nets.has(net);
+  if (role === "lead") return sel.nets.has(net) || (sel.parts.has(part) && !sel.fromNet);
+  if (role === "sheet") return false;
+  return part != null && sel.parts.has(part);
+}
+function litBatches(sel) {
+  const key = selKey(sel); if (key === litKey && LIT) return LIT;
+  litKey = key; LIT = makeBatches(p => litTest(sel, p.role, p.net, p.part)); return LIT;
+}
+
+// ---------------------------------------------------------------------
+// Painting
+// ---------------------------------------------------------------------
+let frame = 0, interactingUntil = 0;
+function draw() { if (!frame) frame = requestAnimationFrame(() => { frame = 0; paint(); }); }
+const onScreen = b => b[2] * cam.s + cam.x > -2 && b[0] * cam.s + cam.x < W + 2 && b[3] * cam.s + cam.y > -2 && b[1] * cam.s + cam.y < H + 2;
+function paint() {
+  if (!D) return;
+  const t0 = performance.now(), busy = t0 < interactingUntil;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = INK.bg; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.setTransform(cam.s * DPR, 0, 0, cam.s * DPR, cam.x * DPR, cam.y * DPR);
+  ctx.lineCap = "butt"; ctx.lineJoin = "miter"; ctx.miterLimit = 4;
+  const sel = current(), vis = D.areas.map(A => onScreen(A.box)), minW = 1 / cam.s;
+  const run = list => { for (const b of list) { if (!vis[b.a]) continue;
+    if (b.fill) { ctx.fillStyle = b.fill; ctx.fill(b.path); }
+    if (b.stroke) { ctx.strokeStyle = b.stroke; ctx.lineWidth = Math.max(b.w, minW); ctx.lineCap = b.cap; ctx.stroke(b.path); } } };
+  ctx.globalAlpha = sel ? 0.15 : 1; run(BATCH);
+  if (sel) { ctx.globalAlpha = 1; run(litBatches(sel)); }
+  paintText(sel, vis, busy);
+  // block titles: one line above each area
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.globalAlpha = 1;
+  const tpx = Math.max(13, PX.area * K * cam.s) * TEXTSCALE;
+  ctx.font = `500 ${tpx.toFixed(1)}px "IBM Plex Sans", sans-serif`; ctx.fillStyle = INK.ink2; ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+  D.areas.forEach((A, i) => { if (vis[i]) ctx.fillText(A.title, A.box[0] * cam.s + cam.x, A.box[1] * cam.s + cam.y - 6); });
+  document.getElementById("zpct").textContent = Math.round(cam.s / fitScale() * 100) + "%";
+  lastPaint = performance.now() - t0;
+}
+let lastPaint = 0, lastFont = "";
+const FACE = { mono: '"IBM Plex Mono", monospace', name: '"IBM Plex Sans", sans-serif' };
+function paintText(sel, vis, busy) {
+  // each kind of text appears at its own zoom level (SHOW_AT); it keeps its size on screen, growing a little once zoomed
+  // in (GROW_MAX), and text that was cut to its room gets the room it has at this zoom. Panning changes none of this.
+  const r = K * cam.s, f = r <= 1 ? 1 : Math.min(r, GROW_MAX);
+  lastFont = "";
+  for (const t of TEXTS) {
+    if (!vis[t.a]) continue;
+    if (r < (SHOW_AT[t.lvl] ?? 1)) continue;
+    const size = t.px * f;
+    const x = t.x * cam.s + cam.x + (t.dx || 0) * f, y = t.y * cam.s + cam.y + (t.dy || 0) * f;
+    if (t.room) t.s = fitStr(t.full, Math.floor((t.room * cam.s - (t.dx || 0) * f) / (size * t.cw)));
+    if (x < -300 || x > W + 300 || y < -60 || y > H + 60) continue;
+    ctx.globalAlpha = sel && !litTest(sel, t.role, t.net, t.part) ? 0.15 : 1;
+    const font = `${t.face === "name" ? 500 : 400} ${size.toFixed(1)}px ${FACE[t.face === "name" ? "name" : "mono"]}`;
+    if (font !== lastFont) { ctx.font = font; lastFont = font; }
+    ctx.fillStyle = ctx.strokeStyle = resolve(t.col);
+    ctx.textAlign = t.align; ctx.textBaseline = t.base;
+    if (t.angle) ctx.setTransform(0, -DPR, DPR, 0, x * DPR, y * DPR); else ctx.setTransform(DPR, 0, 0, DPR, x * DPR, y * DPR);
+    if (!/[~_^]\{/.test(t.s)) { ctx.fillText(t.s, 0, 0); continue; }
+    drawMarkup(t.s, size, t.align);
+  }
+  ctx.globalAlpha = 1;
+}
+// KiCad text markup: ~{overbar}, _{sub}, ^{super}
+function drawMarkup(s, size, align) {
+  const segs = []; const re = /([~_^])\{([^}]*)\}/g; let i = 0, m;
+  while ((m = re.exec(s))) { if (m.index > i) segs.push([s.slice(i, m.index), ""]); segs.push([m[2], m[1]]); i = re.lastIndex; }
+  if (i < s.length) segs.push([s.slice(i), ""]);
+  const widths = segs.map(([t, k]) => ctx.measureText(t).width * (k === "_" || k === "^" ? 0.75 : 1)), total = widths.reduce((a, b) => a + b, 0);
+  let x = align === "left" ? 0 : align === "center" ? -total / 2 : -total;
+  const saved = ctx.textAlign; ctx.textAlign = "left";
+  const top = ctx.textBaseline === "middle" ? -size * 0.42 : ctx.textBaseline === "top" ? 0 : -size * 0.78;
+  segs.forEach(([t, k], j) => {
+    if (k === "_" || k === "^") { ctx.save(); ctx.translate(x, k === "_" ? size * 0.2 : -size * 0.3); ctx.scale(0.75, 0.75); ctx.fillText(t, 0, 0); ctx.restore(); }
+    else ctx.fillText(t, x, 0);
+    if (k === "~") ctx.fillRect(x, top - size * 0.12, widths[j], Math.max(0.8, size * 0.07));
+    x += widths[j];
+  });
+  ctx.textAlign = saved;
+}
+function resize() { DPR = Math.min(devicePixelRatio || 1, 2); W = view.clientWidth; H = view.clientHeight; cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR); draw(); }
+new ResizeObserver(resize).observe(view);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { readInk(); if (D) { batches(); draw(); drawLegend(); } });
+
+// ---------------------------------------------------------------------
+// Camera
+// ---------------------------------------------------------------------
+const MAX_S = 120;
+function fitScale(b = D ? D.extent : [0, 0, 1, 1], pad = 24) { return Math.min((W - pad * 2) / (b[2] - b[0]), (H - pad * 2) / (b[3] - b[1])); }
+const MIN_S = () => fitScale() * 0.5;
+function busyFor(ms = 140) { interactingUntil = performance.now() + ms; clearTimeout(busyFor.t); busyFor.t = setTimeout(draw, ms + 10); }
+function zoomAt(sx, sy, f) {
+  const s = Math.min(MAX_S, Math.max(MIN_S(), cam.s * f)); f = s / cam.s;
+  cam.x = sx - (sx - cam.x) * f; cam.y = sy - (sy - cam.y) * f; cam.s = s; anim = null; busyFor(); draw(); saveView();
+}
+let anim = null;
+function flyTo(b, pad = 40, maxS = 30) {
+  const s = Math.min(fitScale(b, pad), maxS), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2, from = { ...cam }, t0 = performance.now(), dur = 450;
+  const wx0 = (W / 2 - from.x) / from.s, wy0 = (H / 2 - from.y) / from.s;
+  anim = now => {
+    const k = Math.min(1, (now - t0) / dur), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+    const s1 = Math.exp(Math.log(from.s) + (Math.log(s) - Math.log(from.s)) * e), wx = wx0 + (cx - wx0) * e, wy = wy0 + (cy - wy0) * e;
+    cam.s = s1; cam.x = W / 2 - wx * s1; cam.y = H / 2 - wy * s1;
+    interactingUntil = k < 1 ? now + 100 : 0; paint();
+    if (k < 1 && anim) requestAnimationFrame(anim); else { anim = null; saveView(); paint(); }
+  };
+  requestAnimationFrame(anim);
+}
+const fitAll = () => flyTo(D.extent, 24, 1e9);
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = cv.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top;
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1, dx = e.deltaX * unit, dy = e.deltaY * unit;
+  // pinch (ctrl + wheel) and mouse wheels zoom; two-finger trackpad scrolling pans
+  const mouseWheel = e.deltaMode !== 0 || (dx === 0 && Math.abs(dy) >= 40 && Number.isInteger(dy));
+  if (e.ctrlKey || e.metaKey) zoomAt(sx, sy, Math.exp(-dy * 0.012));
+  else if (mouseWheel || e.altKey) zoomAt(sx, sy, Math.exp(-dy * 0.0022));
+  else { cam.x -= dx; cam.y -= dy; anim = null; busyFor(); draw(); saveView(); }
+  hideTip();
+}, { passive: false });
+const pointers = new Map(); let drag = null, moved = false, pinch = null;
+cv.addEventListener("pointerdown", e => {
+  cv.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); anim = null;
+  if (pointers.size === 1) { drag = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y }; moved = false; }
+  if (pointers.size === 2) { const [a, b] = [...pointers.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), s: cam.s, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, cx: cam.x, cy: cam.y }; drag = null; }
+});
+cv.addEventListener("pointermove", e => {
+  const r = cv.getBoundingClientRect();
+  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch && pointers.size === 2) {
+    const [a, b] = [...pointers.values()], d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const s = Math.min(MAX_S, Math.max(MIN_S(), pinch.s * d / pinch.d)), f = s / pinch.s;
+    cam.s = s; cam.x = (mx - r.left) - ((pinch.mx - r.left) - pinch.cx) * f; cam.y = (my - r.top) - ((pinch.my - r.top) - pinch.cy) * f;
+    moved = true; busyFor(); draw(); return;
+  }
+  if (drag) {
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!moved && Math.hypot(dx, dy) > 3) { moved = true; cv.classList.add("dragging"); if (!tipPinned) hideTip(); }
+    if (moved) { cam.x = drag.cx + dx; cam.y = drag.cy + dy; busyFor(); draw(); return; }
+  }
+  if (e.pointerType === "mouse") hoverAt(e.clientX - r.left, e.clientY - r.top, e.clientX, e.clientY);
+});
+const endPointer = e => {
+  pointers.delete(e.pointerId); if (pointers.size < 2) pinch = null;
+  if (drag && !moved && e.type === "pointerup") { const r = cv.getBoundingClientRect(); clickAt(e.clientX - r.left, e.clientY - r.top, e.clientX, e.clientY); }
+  if (pointers.size === 0) { drag = null; cv.classList.remove("dragging"); saveView(); }
+};
+cv.addEventListener("pointerup", endPointer); cv.addEventListener("pointercancel", endPointer);
+cv.addEventListener("pointerleave", () => { if (!drag) { setHover(null); hideTip(); } });
+cv.addEventListener("dblclick", e => { const r = cv.getBoundingClientRect(); zoomAt(e.clientX - r.left, e.clientY - r.top, 2.2); });
+document.getElementById("zin").onclick = () => zoomAt(W / 2, H / 2, 1.6);
+document.getElementById("zout").onclick = () => zoomAt(W / 2, H / 2, 1 / 1.6);
+document.getElementById("zfit").onclick = () => fitAll();
+addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") { if (e.key === "Escape") e.target.blur(); return; }
+  if (e.key === "Escape") { pinned = null; hover = null; draw(); send(null, true); unpinTip(); hideTip(); }
+  else if (e.key === "f" || e.key === "0") fitAll();
+  else if (e.key === "+" || e.key === "=") zoomAt(W / 2, H / 2, 1.4);
+  else if (e.key === "-") zoomAt(W / 2, H / 2, 1 / 1.4);
+  else if (/^[1-9]$/.test(e.key) && D.areas[+e.key - 1]) showArea(+e.key - 1);
+  else if (e.key === "/") { e.preventDefault(); document.getElementById("find").focus(); }
+});
+const VIEW_KEY = "mynd-circuit-view";
+let saveT = 0;
+function saveView() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(VIEW_KEY, JSON.stringify({ s: cam.s / fitScale(), cx: (W / 2 - cam.x) / cam.s, cy: (H / 2 - cam.y) / cam.s })); } catch {} }, 250); }
+function restoreView() { try { const v = JSON.parse(localStorage.getItem(VIEW_KEY)); if (!v || !isFinite(v.s)) return false; cam.s = v.s * fitScale(); cam.x = W / 2 - v.cx * cam.s; cam.y = H / 2 - v.cy * cam.s; return true; } catch { return false; } }
+function showArea(i) { flyTo(D.areas[i].box, 30, 1e9); }
+
+// ---------------------------------------------------------------------
+// Hit testing
+// ---------------------------------------------------------------------
+const inBox = (b, x, y, pad = 0) => x >= b[0] - pad && x <= b[2] + pad && y >= b[1] - pad && y <= b[3] + pad;
+function segDist(px, py, x1, y1, x2, y2) { const dx = x2 - x1, dy = y2 - y1, l = dx * dx + dy * dy, t = l ? Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / l)) : 0; return Math.hypot(px - x1 - t * dx, py - y1 - t * dy); }
+function pick(sx, sy) {
+  const x = (sx - cam.x) / cam.s, y = (sy - cam.y) / cam.s, tol = Math.max(0.35, 5 / cam.s);
+  const ai = D.areas.findIndex(A => inBox(A.box, x, y, 4)); if (ai < 0) return null;
+  const A = D.areas[ai], lx = x - A.ox, ly = y - A.oy;
+  // a pin of a part under the cursor
+  let best = null, bd = tol;
+  for (const recs of D.byRef.values()) for (const r of recs) if (r.area === ai && inBox(r.box, x, y, tol * 2)) for (const p of r.part.p) { if (p[8] === -1) continue; const d = Math.hypot(p[0] - lx, p[1] - ly); if (d < bd * 0.8) { bd = d; best = { kind: "pin", ref: r.ref, pin: p }; } }
+  if (best) return best;
+  // the smallest part body under the cursor
+  let pa = Infinity;
+  for (const recs of D.byRef.values()) for (const r of recs) if (r.area === ai && inBox(r.box, x, y, tol * 0.5)) { const a = (r.box[2] - r.box[0]) * (r.box[3] - r.box[1]); if (a < pa) { pa = a; best = { kind: "part", ref: r.ref }; } }
+  if (best) return best;
+  for (const w of A.wires) { const d = segDist(lx, ly, w[0], w[1], w[2], w[3]); if (d < bd) { bd = d; best = { kind: "net", n: w[4] }; } }
+  if (best) return best;
+  // leads the page draws itself (inside symbols, transistor buses): test the stroke
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  for (const p of PRIMS) if (p.a === ai && p.net >= 0 && p.role === "lead" && inBox(p.box, x, y, tol)) {
+    ctx.lineWidth = Math.max((p.w || 0) * K, tol * 2);
+    if (ctx.isPointInStroke(p.path, x, y)) { best = { kind: "net", n: p.net }; break; }
+  }
+  ctx.restore();
+  if (best) return best;
+  for (const t of TEXTS) if (t.a === ai && t.role === "net" && Math.abs(t.y - y) < t.px * K && Math.abs(t.x - x) < monoW(t.s, 9) + 1) return { kind: "net", n: t.net };
+  for (const part of A.parts) if (part.pwr !== undefined && Math.hypot(part.p[0][0] + part.dir[0] * 1.5 - lx, part.p[0][1] + part.dir[1] * 1.5 - ly) < 1.8) return { kind: "net", n: part.p[0][4] };
+  for (const e of A.sheets) if (inBox([e.x, e.y, e.x + e.w, e.y + e.h], lx, ly)) return { kind: "sheet", e };
+  return null;
+}
+// a pin stands for its net (pin 3 of P1C → UART2_RX, lit everywhere including that pin in 3D); a pin on nothing, for its part
+const selOf = h => !h ? null : h.kind === "part" ? partSel(h.ref) : h.kind === "pin" ? (h.pin[4] >= 0 ? netSel(h.pin[4]) : partSel(h.ref)) : h.kind === "net" && h.n >= 0 ? netSel(h.n) : null;
+function setHover(s) { if (selKey(s) === selKey(hover)) return; hover = s; draw(); send(current(), false); }
+function hoverAt(sx, sy, cx, cy) {
+  const h = pick(sx, sy);
+  cv.classList.toggle("pointing", !!h);
+  if (!pinned) setHover(selOf(h));
+  if (tipPinned) return;                               // a pinned tooltip stays until the next click
+  if (h) showTip(h, cx, cy); else hideTip();
+}
+function clickAt(sx, sy, cx, cy) {
+  const h = pick(sx, sy);
+  if (h && h.kind === "sheet") { unpinTip(); hideTip(); showArea(h.e.target); return; }
+  const s = selOf(h), again = s && selKey(s) === selKey(pinned);
+  pinned = s && !again ? s : null; hover = null; draw(); send(pinned, true);
+  // click: the tooltip stays where it is, so it can be read and its text copied; click again or on nothing to let go
+  if (pinned) { tipPinned = false; showTip(h, cx, cy); pinTip(); } else { unpinTip(); hideTip(); }
+}
+
+// ---------------------------------------------------------------------
+// Tooltip: what a part is, what a line is for, and what it connects
+// ---------------------------------------------------------------------
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const plain = s => String(s).replace(/~\{([^}]*)\}/g, "$1̅").replace(/[_^]\{([^}]*)\}/g, "$1");
+// unnamed nets are called after what they join: "between Q1U and Q2U"
+const netLabel = n => { if (n < 0) return "not connected"; if (shortName(n)) return plain(shortName(n));
+  const refs = [...new Set((D.netNodes[D.nets[n]] || []).map(x => x[0]))]; return refs.length && refs.length <= 3 ? "between " + refs.join(refs.length === 2 ? " and " : ", ") : D.nets[n]; };
+const netDesc = n => n >= 0 ? D.netMeta.nets[n][2] || "" : "";
+let tipPinned = false;
+function pinTip() { tipPinned = true; tip.classList.add("pinned"); }
+function unpinTip() { tipPinned = false; tip.classList.remove("pinned"); }
+function partHtml(ref) {
+  const P = D.parts[ref] || {}, f = P.f || {}, recs = D.byRef.get(ref) || [], part = recs[0] && recs[0].part;
+  const mpn = [f.MANUFACTURER, f.PART_NUMBER].filter(x => x && x !== "Generic" && x !== "Multi Sourced").join(" ");
+  const name = part && part.name ? part.name.replace("\n", " ") : "";
+  return `<div class="t-name">${esc(ref)} ${esc(name || P.v || "")}</div>` + (P.d ? `<div class="t-desc">${esc(P.d)}</div>` : "") +
+         `<div class="t-pn">${esc(P.v || "")} · ${esc(P.fp || "")}${mpn ? " · " + esc(mpn) : ""}</div>`;
+}
+// what a net connects: chip pins by function, the rest by designator ("U1C VDD ×5 · FB18C · C29C …")
+function connects(n, max = 10) {
+  const nodes = D.netNodes[D.nets[n]] || [], by = new Map();
+  for (const [ref, pin, func] of nodes) { const f = (func || "").replace(/_\d+$/, ""), key = /^[UQ]\d/.test(ref) && f && f !== pin ? `${ref} ${f}` : ref; by.set(key, (by.get(key) || 0) + 1); }
+  const items = [...by].sort((a, b) => /^[UQP]\d/.test(b[0]) - /^[UQP]\d/.test(a[0])).map(([k, c]) => c > 1 ? `${k} ×${c}` : k);
+  return esc(items.slice(0, max).join(" · ") + (items.length > max ? ` · ${items.length - max} more` : ""));
+}
+// a part's pins, with merged ones together: "1 19 32 48 64 VDD → 3V3_MCU"
+function pinList(ref) {
+  const pins = (D.byRef.get(ref) || []).flatMap(r => r.part.p).filter(p => p[4] >= 0);
+  const rows = new Map();
+  for (const p of pins) { const name = p[3] && p[3] !== p[2] && p[3] !== "~" ? plain(p[3].split("/")[0]) : "", key = name + "|" + p[4];
+    const r = rows.get(key) || rows.set(key, { nums: [], name, net: p[4] }).get(key); r.nums.push(p[2]); }
+  const list = [...rows.values()];
+  const line = r => `${esc(r.nums.join(" "))}${r.name ? " " + esc(r.name) : ""} → ${esc(netLabel(r.net))}`;
+  return `<div class="t-pins">${list.slice(0, 14).map(line).join("<br>")}${list.length > 14 ? `<br>… ${list.length - 14} more` : ""}</div>`;
+}
+function netHtml(n) {
+  const g = group(n), d = netDesc(n), ps = D.netParts.get(n);
+  return `<div class="t-name">${esc(netLabel(n))}</div>` + (d ? `<div class="t-desc">${esc(d)}</div>` : "") +
+         `<div class="t-net">${esc(g ? g[1] : "")}${shortName(n) ? "" : " · " + esc(D.nets[n])} · ${ps ? ps.size : 0} parts</div><div class="t-pins">${connects(n)}</div>`;
+}
+function showTip(h, cx, cy) {
+  if (tipPinned) return;
+  let html = "";
+  if (h.kind === "part") html = partHtml(h.ref) + pinList(h.ref);
+  else if (h.kind === "pin") { const p = h.pin, same = (D.byRef.get(h.ref) || []).flatMap(r => r.part.p).filter(q => q[4] === p[4] && (q === p || q[8] === -1)).map(q => q[2]);
+    html = partHtml(h.ref) + `<div class="t-net">pin ${esc(same.join(" "))}${p[3] && p[3] !== p[2] && p[3] !== "~" ? " " + esc(plain(p[3])) : ""} → ${esc(netLabel(p[4]))}</div>` + (netDesc(p[4]) ? `<div class="t-desc">${esc(netDesc(p[4]))}</div>` : ""); }
+  else if (h.kind === "net") html = netHtml(h.n);
+  else if (h.kind === "sheet") html = `<div class="t-name">${esc(D.areas[h.e.target].title)}</div><div class="t-net">click to go to this area</div>`;
+  tip.innerHTML = html; tip.style.opacity = 1;
+  const r = tip.getBoundingClientRect();
+  tip.style.left = Math.min(cx + 16, innerWidth - r.width - 10) + "px"; tip.style.top = Math.min(cy + 16, innerHeight - r.height - 10) + "px";
+}
+const hideTip = () => { if (!tipPinned) tip.style.opacity = 0; };
+
+// ---------------------------------------------------------------------
+// Legend (Schematik's aside): lines, symbols, areas, view
+// ---------------------------------------------------------------------
+function drawLegend() {
+  const box = document.getElementById("legend"), layout = box.closest(".layout"), key = "mynd-legend-collapsed";
+  box.textContent = "";
+  const fold = document.createElement("button"); fold.className = "lg-fold";
+  const setFolded = f => { layout.classList.toggle("folded", f); fold.textContent = f ? "legend" : "hide legend"; try { localStorage.setItem(key, f ? "1" : ""); } catch {} };
+  fold.onclick = () => setFolded(!layout.classList.contains("folded")); box.append(fold);
+  let folded = false; try { folded = localStorage.getItem(key) === "1"; } catch {} setFolded(folded);
+  const head = t => { const h = document.createElement("h2"); h.textContent = t; box.append(h); };
+  // a row: a little canvas with the symbol, then the words; hovering lights those things on the map
+  const row = (paintFn, label, h, sel, desc) => {
+    const d = document.createElement("div"); d.className = "lg-row";
+    const c = document.createElement("canvas"), dpr = Math.min(devicePixelRatio || 1, 2), hh = h || 24 + GW * 2;
+    c.width = 44 * dpr; c.height = hh * dpr; c.style.width = "44px"; c.style.height = hh + "px";
+    const g = c.getContext("2d"); g.scale(dpr, dpr); g.lineCap = "butt"; g.lineJoin = "miter"; paintFn(g, 22, hh / 2);
+    const t = document.createElement("span"); t.textContent = label; d.append(c, t); box.append(d);
+    if (!sel) return;
+    d.classList.add("live");
+    d.addEventListener("pointerenter", e => { if (!pinned) { hover = sel; draw(); } if (!tipPinned) showTipHtml(e, `<div class="t-name">${esc(label)}</div>${desc ? `<div class="t-desc">${esc(desc)}</div>` : ""}`); });
+    d.addEventListener("pointermove", e => { if (!tipPinned) showTipHtml(e); });
+    d.addEventListener("pointerleave", () => { hideTip(); if (!pinned) { hover = null; draw(); } });
+    d.addEventListener("click", e => { const again = selKey(pinned) === selKey(sel); pinned = again ? null : sel; hover = null; draw(); send(pinned, true);
+      if (again) { unpinTip(); hideTip(); } else { unpinTip(); showTipHtml(e); pinTip(); } });
+  };
+  const prims = (g, list, x, y, s = 1) => { for (const p of list) { g.beginPath();
+    if (p.circle) g.arc(x + p.circle[0] * s, y + p.circle[1] * s, p.circle[2] * s, 0, Math.PI * 2);
+    else { for (let i = 0; i < p.pts.length; i += 2) (i ? g.lineTo : g.moveTo).call(g, x + p.pts[i] * s, y + p.pts[i + 1] * s); if (p.closed) g.closePath(); }
+    if (p.fill) { g.fillStyle = resolve(p.fill); g.fill(); }
+    if (p.stroke != null) { g.strokeStyle = typeof p.stroke === "number" ? INK.ink : resolve(p.stroke); g.lineWidth = p.w; g.stroke(); } } };
+  const line = (w, c) => (g, x, y) => { g.strokeStyle = c; g.lineWidth = w; g.beginPath(); g.moveTo(4, y); g.lineTo(40, y); g.stroke(); };
+  const netsOfGroup = gi => D.netMeta.nets.map((m, i) => m[1] === gi ? i : -1).filter(i => i >= 0 && (D.netParts.get(i) || new Set()).size);
+  head("Lines");
+  if (MULTI) D.netMeta.groups.forEach(([c, label, power, desc], gi) => {
+    const nets = netsOfGroup(gi); if (!nets.length) return;
+    row(line((power && !UNIFORM ? LW * 1.6 : LW), gi === 0 ? INK.ink : c), label, null, groupSel(nets), desc + (nets.length < 9 ? " " + nets.map(n => shortName(n)).filter(Boolean).join(" · ") : ""));
+  });
+  else {
+    const supply = D.nets.map((_, i) => i).filter(isPower), signal = D.nets.map((_, i) => i).filter(i => !isPower(i));
+    if (UNIFORM) row(line(LW, INK.ink), "connection", null, groupSel([...supply, ...signal]), "Every line has the same weight in this view.");
+    else { row(line(LW * 1.6, INK.ink), "supply and ground", null, groupSel(supply), "Lines that carry power: drawn heavier.");
+      row(line(LW, INK.ink), "signal", null, groupSel(signal), "Lines that carry information or control."); }
+  }
+  row((g, x, y) => { line(LW, INK.ink)(g, x, y); g.beginPath(); g.moveTo(x, y); g.lineTo(x, y + 12); g.stroke(); g.beginPath(); g.arc(x, y, Math.max(2.4, LW * 0.9 + 1), 0, Math.PI * 2); g.fillStyle = INK.ink; g.fill(); }, "joined", null, null);
+  row((g, x, y) => { line(LW, INK.ink)(g, x, y); g.beginPath(); g.moveTo(x, y - 10); g.lineTo(x, y + 10); g.stroke(); }, "crossing, not joined", null, null);
+  row((g, x, y) => { g.strokeStyle = INK.ink; g.lineWidth = LW; g.beginPath(); g.moveTo(2, y); g.lineTo(14, y); g.stroke(); g.fillStyle = INK.ink; g.font = '9px "IBM Plex Mono", monospace'; g.textBaseline = "middle"; g.fillText("SDA", 17, y); }, "continues at the same name elsewhere", null, null);
+  head("Symbols");
+  const partsOf = k => [...D.byRef.values()].map(r => r[0]).filter(r => r.part.k === k).map(r => r.ref);
+  const sym = (k, label, desc, paintFn, h) => { const ids = partsOf(k); if (ids.length) row(paintFn, `${label} (${ids.length})`, h, groupSel([], ids), desc); };
+  const two = k => (g, x, y) => { g.strokeStyle = INK.ink; g.lineWidth = LW; g.beginPath(); g.moveTo(4, y); g.lineTo(x - ALONG[k], y); g.moveTo(x + ALONG[k], y); g.lineTo(40, y); g.stroke(); prims(g, glyph2(k), x, y); };
+  sym("r", "resistor", "Limits current or sets a voltage.", two("r"));
+  sym("c", "capacitor", "Stores a little charge to smooth a supply or slow a signal down.", two("c"));
+  sym("l", "inductor", "Stores energy in a magnetic field; smooths a switching supply.", two("l"));
+  sym("fb", "ferrite bead", "Soaks up high-frequency noise on a line.", two("fb"));
+  sym("d", "diode", "Lets current flow one way only.", two("d"));
+  sym("tvs", "ESD protection diode", "Clamps static shocks to ground before they reach the chip.", two("tvs"));
+  const fet = k => (g, x, y) => { prims(g, fetGlyph(k), 30, y, 0.8); g.strokeStyle = INK.ink; g.lineWidth = GW; g.beginPath(); g.moveTo(4, y); g.lineTo(30 - 22 * 0.8, y); g.stroke(); };
+  sym("nfet", "N-channel MOSFET", "A switch that turns on when its gate is above its source.", fet("nfet"), 40 + GW * 2);
+  sym("pfet", "P-channel MOSFET", "A switch that turns on when its gate is below its source; it switches the positive supply.", fet("pfet"), 40 + GW * 2);
+  sym("tp", "test point", "A pad to reach a signal with a probe.", (g, x, y) => { g.strokeStyle = INK.ink; g.lineWidth = LW; g.beginPath(); g.moveTo(4, y); g.lineTo(x, y); g.stroke(); prims(g, [P(null, { circle: [3.5, 0, 3.5], stroke: "ink", fill: "bg", w: GW })], x, y); });
+  sym("box", "chip or connector", "Its pins are named inside the outline.", (g, x, y) => { g.strokeStyle = INK.ink; g.lineWidth = GW; g.strokeRect(12, y - 9, 22, 18); g.lineWidth = LW; g.beginPath(); g.moveTo(2, y); g.lineTo(12, y); g.stroke(); });
+  row((g, x, y) => { g.strokeStyle = INK.ink; g.lineWidth = LW; g.beginPath(); g.moveTo(x, y - 9); g.lineTo(x, y - 2); g.stroke(); prims(g, groundGlyph(0, 0).map(p => ({ ...p, pts: [p.pts[1], p.pts[0], p.pts[3], p.pts[2]] })), x, y - 2); }, "ground", null, D.netIndex.has("GND") ? netSel(D.netIndex.get("GND")) : null, "The common 0 V return for every circuit.");
+  // where the power comes from and where it goes: hover a step to see it on the map
+  head("Power");
+  const tree = document.createElement("div"); tree.className = "lg-power"; box.append(tree);
+  for (const [depth, nets, refs, txt] of D.netMeta.power) {
+    const idx = nets.map(n => D.netIndex.get(n) ?? D.nets.findIndex(x => x.endsWith("/" + n))).filter(i => i >= 0);
+    const r = document.createElement("div"); r.className = "lg-row live lg-step"; r.style.paddingLeft = depth * 10 + "px";
+    const sw = document.createElement("i"); sw.style.background = idx.length ? netColor(idx[0]) : "transparent"; sw.style.height = (idx.length && isPower(idx[0]) && !UNIFORM ? LW * 1.6 : LW) + "px";
+    const t = document.createElement("span"); t.textContent = txt; r.append(sw, t); tree.append(r);
+    const sel = groupSel(idx, refs.filter(x => D.byRef.has(x))), html = `<div class="t-name">${esc(txt)}</div>` + idx.map(n => `<div class="t-desc"><b>${esc(netLabel(n))}</b>: ${esc(netDesc(n))}</div>`).join("");
+    r.addEventListener("pointerenter", e => { if (!pinned) { hover = sel; draw(); } if (!tipPinned) showTipHtml(e, html); });
+    r.addEventListener("pointermove", e => { if (!tipPinned) showTipHtml(e); });
+    r.addEventListener("pointerleave", () => { hideTip(); if (!pinned) { hover = null; draw(); } });
+    r.addEventListener("click", e => { const again = selKey(pinned) === selKey(sel); pinned = again ? null : sel; hover = null; draw(); send(pinned, true); flyToSel(sel);
+      if (again) { unpinTip(); hideTip(); } else { unpinTip(); showTipHtml(e, html); pinTip(); } });
+  }
+  head("Areas");
+  D.areas.forEach((A, i) => { const b = document.createElement("button"); b.className = "lg-area"; b.textContent = `${i + 1}  ${A.title}`; b.onclick = () => showArea(i); box.append(b); });
+  head("View");
+  const links = document.createElement("div"); links.className = "lg-links";
+  const link = (label, params) => { const a = document.createElement("a"); const q = new URLSearchParams(location.search);
+    for (const [k, v] of Object.entries(params)) v == null ? q.delete(k) : q.set(k, v); a.href = "?" + q.toString(); a.textContent = label; links.append(a); };
+  link(MULTI ? "single ink" : "colour", { color: MULTI ? "ink" : null });
+  link(LW > 2 ? "thin lines" : "metro lines", { width: LW > 2 ? "1.1" : null });
+  link(UNIFORM ? "weighted" : "uniform", { uniform: UNIFORM ? "0" : null });
+  box.append(links);
+  const sizes = document.createElement("div"); sizes.className = "lg-links lg-text"; sizes.title = "Text size";
+  for (const [k, scale, px] of [["normal", 1, 11], ["big", 1.3, 14], ["giant", 1.65, 18]]) {
+    const q = new URLSearchParams(location.search); k === "big" ? q.delete("text") : q.set("text", k);
+    const a = document.createElement(scale === TEXTSCALE ? "span" : "a"); a.textContent = "A"; a.style.fontSize = px + "px";
+    if (scale === TEXTSCALE) a.className = "on"; else a.href = "?" + q.toString();
+    sizes.append(a);
+  }
+  box.append(sizes);
+}
+function showTipHtml(e, html) {
+  if (html) tip.innerHTML = html; tip.style.opacity = 1;
+  // the legend sits on the right: its tooltips open to the left of the pointer, over the map
+  const w = tip.offsetWidth, left = e.clientX > innerWidth - 420 ? e.clientX - w - 16 : e.clientX + 16;
+  tip.style.left = Math.max(8, Math.min(left, innerWidth - w - 10)) + "px"; tip.style.top = Math.min(e.clientY + 16, innerHeight - tip.offsetHeight - 10) + "px";
+}
+
+// ---------------------------------------------------------------------
+// Find
+// ---------------------------------------------------------------------
+function selectByName(v, fly) {
+  let s = null;
+  const ref = D.byRef.has(v) ? v : [...D.byRef.keys()].find(r => r.toLowerCase() === v.toLowerCase());
+  if (ref) s = partSel(ref);
+  else {
+    const lv = v.toLowerCase();
+    let n = D.nets.findIndex(x => x.toLowerCase() === lv); if (n < 0) n = D.netMeta.nets.findIndex(m => m[0].toLowerCase() === lv || m[0].replace(/[~{}]/g, "").toLowerCase() === lv);
+    if (n >= 0) s = netSel(n);
+  }
+  if (!s) { status.textContent = `nothing called ${v}`; return false; }
+  pinned = s; hover = null; draw(); send(pinned, true);
+  if (fly) flyToSel(s);
+  return true;
+}
+function flyToSel(s) {
+  const b = [Infinity, Infinity, -Infinity, -Infinity], grow = q => { b[0] = Math.min(b[0], q[0]); b[1] = Math.min(b[1], q[1]); b[2] = Math.max(b[2], q[2]); b[3] = Math.max(b[3], q[3]); };
+  if (s.kind !== "net") for (const r of s.parts) for (const rec of D.byRef.get(r) || []) grow(rec.box);
+  if (s.kind !== "part") for (const p of PRIMS) if (p.role === "net" && s.nets.has(p.net)) grow(p.box);
+  if (s.kind === "part") {
+    const areas = new Set([...s.parts].flatMap(r => (D.byRef.get(r) || []).map(x => x.area)));
+    for (const p of PRIMS) if (p.role === "net" && areas.has(p.a) && s.nets.has(p.net) && !isRail(p.net)) grow(p.box);
+  }
+  if (!isFinite(b[0])) return;
+  const MIN = 80, cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2, hw = Math.max(MIN, b[2] - b[0]) / 2 + 4, hh = Math.max(MIN * 0.6, b[3] - b[1]) / 2 + 4;
+  flyTo([cx - hw, cy - hh, cx + hw, cy + hh], 40, 1e9);
+}
+function buildFind() {
+  const dl = document.getElementById("finds");
+  dl.innerHTML = [...D.byRef.keys()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map(r => `<option value="${esc(r)}">${esc((D.parts[r] || {}).v || "")}</option>`).join("") +
+                 D.netMeta.nets.map(m => m[0]).filter(Boolean).map(s => `<option value="${esc(s)}"></option>`).join("");
+  const find = document.getElementById("find"), go = () => { const v = find.value.trim(); if (v) selectByName(v, true); };
+  find.addEventListener("change", go); find.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+}
+
+// ---------------------------------------------------------------------
+// Sync with board3d.html: { type: "focus", source, kind, parts: [refs], nets: [names], pinned }
+// ---------------------------------------------------------------------
+const bus = "BroadcastChannel" in window ? new BroadcastChannel("mynd") : null;
+let lastSent = "";
+function send(sel, isPinned) {
+  if (!bus) return;
+  const msg = { type: "focus", source: "schematic", kind: sel ? (sel.kind === "group" ? "net" : sel.kind) : null, parts: sel ? [...sel.parts] : [], nets: sel ? [...sel.nets].map(n => D.nets[n]) : [], pinned: !!isPinned };
+  const key = JSON.stringify(msg); if (key === lastSent) return; lastSent = key; bus.postMessage(msg);
+}
+if (bus) bus.onmessage = e => {
+  const m = e.data; if (!m || m.type !== "focus" || m.source === "schematic" || !D) return;
+  let s = null;
+  if (m.kind === "net" && m.nets && m.nets.length) { const n = D.netIndex.get(m.nets[0]); if (n !== undefined) s = netSel(n); }
+  else if (m.parts && m.parts.length) { const r = m.parts.find(r => D.byRef.has(r)); if (r) s = partSel(r); }
+  if (m.pinned) { pinned = s; hover = null; if (s) flyToSel(s); } else hover = s;
+  draw();
+};
+
+// ---------------------------------------------------------------------
+// Load
+// ---------------------------------------------------------------------
+(async () => {
+  try { const r = await fetch(DATA_URL); if (!r.ok) throw new Error(r.status); D = await r.json(); }
+  catch (err) { document.getElementById("drop").classList.add("show"); status.textContent = "no data"; return; }
+  if (document.fonts) await Promise.race([document.fonts.load('9px "IBM Plex Mono"'), new Promise(r => setTimeout(r, 1500))]);
+  build(); buildFind(); drawLegend();
+  DPR = Math.min(devicePixelRatio || 1, 2); W = view.clientWidth; H = view.clientHeight; cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  const aq = QS.get("area"), ai = aq ? D.areas.findIndex(A => A.name === aq || A.name.replace(/^U_/, "") === aq) : -1;
+  const centre = b => { const s = fitScale(b, 30); cam.s = s; cam.x = W / 2 - (b[0] + b[2]) / 2 * s; cam.y = H / 2 - (b[1] + b[3]) / 2 * s; };
+  if (ai >= 0) centre(D.areas[ai].box); else if (!restoreView()) centre(D.extent);
+  status.textContent = `${D.byRef.size} parts · ${D.nets.length} nets · ${D.areas.length} areas`;
+  if (QS.get("select")) selectByName(QS.get("select"), true);
+  paint();                       // straight away: animation frames wait while the tab is in the background
+})();
+</script>
+</body>
+</html>

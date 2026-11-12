@@ -1,0 +1,69 @@
+Actual bugs in the rendering 3D:
+
+    Net-(U2E-SW1) does not seem to make a connection between  one pad of the L1E and U2E
+    5V_CCPD seems to have a gap I don't see how it connects L3E to P3M 
+    Show the U2U in the 3D file (even when there might be no 3d file for it), as a block. Check other components as well that might be missing from the CAD file.
+    It feels like the zoom and pan in 3D is not intuitive; zooming doesn't use the cursor position to zoom into; but just generally zooms. 
+    In the 3D view don't populate not connected resistors/other components.
+
+Bug in rendering the schematic
+    When panning the Schematik view it also hides all the internal component numbering; please make sure they move accordingly and keep being rendered.
+    Render ground always in the deepest layer most to the background
+
+
+Content improvements:
+    Give the connectors meaningfull names:
+        P1M Battery Connector
+        P2M Amplifier Board Connector
+        P3M Bluetooth Board Connector
+        P4M USB Board Connector
+        P5M UI Board Connector
+        P6M Aux Jack Board Connector
+    Show the datasheet link for ICs and mosfets etc (special components) from LCSC
+
+    Show OHM as a symbol Ω since I see some confusion with "10OHM" since it looks like 100HM
+
+
+Visual improvements:
+
+    When the legend is collpased; make the whole box transparent (so the area underneath the legend button can be used for the schematic).
+
+
+    Make the fixed font-size less strict:
+        Allow refitting the text in the space when zooming in (now the text remains truncated when zoomed in). Keep inspiration from maps like applications where on different zoom levels you might have different font sizes.
+
+        400% should still show the netlist at the end of lines.
+        600% should still show the internal names of pins on ICs etc.
+        800% should show the component value 100nF or 10kΩ but also stuff like TP30M or ESD2C (where the value is a component number instead of a value show the designator)
+        1000% should start showing the component number
+
+        Make sure these threshold points can be easily adjusted and are a rough indication based on the current view; when more complex schematics would be added these zoom levels don't represent the right thresholds anymore.
+
+    When a resistor is 0 Ohm, do show it but continue the netline through the resistor. Also shrink the size to 1/2 while normally it should be 1/3 ratio if the resistor is below 100 Ohm (so also for 0Ohm resistors)
+
+    When a resistor is NC (not connected). Show shape of the schematic in very light gray in the schematik showing that it is not there, but do show the name etc.
+    also for not fitted.
+    Show the shape of the schematic in very light gray, since it could also be a capacitor or some other component.
+
+    Make testpoint selection more obvious. Show TP30M above the tespoint and when clicking/hovering over it; 
+    Next to test points there is an extra dot; which is confusing. 
+
+
+
+
+
+Research:
+    Make an assesment on if it is possible to highlight the pins and connectors when a net is selected. I mean within the connector the specific copper areas that are connected. Or the connection terminals of components (usually rendered shiny/copper)
+
+
+Not do for now:
+    There is a difference in symbol between
+    rectifier diode
+    schottky diode
+    zener diode
+
+
+
+
+
+

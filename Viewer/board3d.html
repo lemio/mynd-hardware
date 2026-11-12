@@ -1,0 +1,852 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MYND Main Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root { color-scheme: light; --bg: #fff; --ink: #1a1a1a; --ink-2: #6e6e6a; --ink-3: #b4b3ae; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { color-scheme: dark; --bg: #161616; --ink: #e8e7e3; --ink-2: #9a9994; --ink-3: #55554f; }
+}
+:root[data-theme="dark"] { color-scheme: dark; --bg: #161616; --ink: #e8e7e3; --ink-2: #9a9994; --ink-3: #55554f; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); }
+body { font: 14px/1.4 "IBM Plex Sans", system-ui, sans-serif; display: flex; flex-direction: column; }
+header { padding: 20px 16px 12px; display: flex; flex-wrap: nowrap; align-items: baseline; gap: 6px 18px; white-space: nowrap; }
+h1 { font-size: 15px; font-weight: 500; margin: 0; letter-spacing: .01em; }
+header a { font-size: 12px; color: var(--ink-2); }
+header input { font: 12px "IBM Plex Mono", monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--ink-3); padding: 3px 6px; width: 180px; }
+header input:focus { outline: none; border-color: var(--ink); }
+#status { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-2); }
+/* the view controls: a small box in the corner of the board, like the circuit page's zoom box */
+.ctl { position: absolute; right: 16px; bottom: 16px; display: grid; grid-template-columns: auto auto; gap: 3px 10px; align-items: baseline;
+       background: var(--bg); border: 1px solid var(--ink-3); padding: 6px 9px; font: 11px "IBM Plex Mono", monospace; color: var(--ink-2); }
+.ctl div { display: flex; gap: 8px; }
+.ctl button { font: inherit; color: var(--ink-2); background: none; border: 0; padding: 0; cursor: pointer; }
+.ctl button:hover { color: var(--ink); }
+.ctl button[aria-pressed="true"] { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+#view { position: relative; flex: 1; min-height: 320px; }
+#view canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+#drop { position: absolute; inset: 0; display: none; place-content: center; text-align: center; gap: 10px; color: var(--ink-2); font-size: 13px; padding: 16px; }
+#drop.show { display: grid; }
+#drop code { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink); }
+.tip { position: fixed; pointer-events: none; z-index: 20; background: var(--bg); color: var(--ink); border: 1px solid var(--ink-3); padding: 6px 8px; font-size: 12px; line-height: 1.4; max-width: 340px; opacity: 0; }
+.tip.pinned { pointer-events: auto; user-select: text; }
+.tip b { font-weight: 500; }
+.tip .d { margin: 3px 0; }
+.tip .m { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-2); }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<header>
+  <h1>MYND main board — 3D</h1>
+  <input id="find" list="finds" placeholder="find part or net" autocomplete="off" spellcheck="false"><datalist id="finds"></datalist>
+  <a href="schematic.html" target="mynd-schematic">circuit</a> <a href="index.html">side by side</a>
+  <span id="status">loading…</span>
+</header>
+<div id="view">
+  <div class="ctl" title="hover copper or a pin to select its net · click to keep it">
+    <span>mode</span><div><button data-mode="focus">focus</button><button data-mode="realistic">real</button><button data-mode="engineering">layers</button><button data-mode="exploded">exploded</button></div>
+    <span>copper</span><div><button data-layer="F.Cu">top</button><button data-layer="In1.Cu">in1</button><button data-layer="In2.Cu">in2</button><button data-layer="B.Cu">bottom</button></div>
+    <span>view</span><div><button data-view="top">top</button><button data-view="angle">angle</button><button data-view="bottom">bottom</button></div>
+  </div>
+  <div id="drop">
+    <div>The model could not be fetched. Open this page through a local server:</div>
+    <div><code>cd Viewer && python3 -m http.server 8000</code> → <code>http://localhost:8000/board3d.html</code></div>
+    <div>Make the model and copper from the KiCad project: <code>Viewer/tools/build.sh</code></div>
+  </div>
+</div>
+<div class="tip" id="tip"></div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+
+// ?select=R32C or ?select=SDA, ?mode=engineering, ?view=top|angle|bottom
+const QS = new URLSearchParams(location.search);
+const MODEL = QS.get("model") || "mynd_main.glb", COPPER = "mynd_main.copper.json", CIRCUIT = "mynd_main.sch.json";
+// focus (the default): the real board, every part see-through, and what is in focus in one contrast colour
+const MODES = ["focus", "realistic", "engineering", "exploded"];
+let MODE = MODES.includes(QS.get("mode")) ? QS.get("mode") : (() => { try { return MODES.includes(localStorage.getItem("mynd-board3d-mode2")) ? localStorage.getItem("mynd-board3d-mode2") : "focus"; } catch { return "focus"; } })();
+const real = () => MODE === "realistic" || MODE === "focus";          // the board as made: red solder mask, white print
+const CONTRAST = "#00d0ff", CONTRAST_SOFT = "#8be6ff", RED_MASK = 0xa81d1d;
+// what is in focus is solid, what supports it is see-through (as in Schematik's board3d)
+const ACCENT = new THREE.Color("#e8590c"), NEAR = new THREE.Color("#1c7ed6");
+const view = document.getElementById("view"), status = document.getElementById("status"), tip = document.getElementById("tip");
+
+// ---------------------------------------------------------------------
+// Scene, drawn only when something changes
+// ---------------------------------------------------------------------
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+view.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, 1, 1, 4000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.screenSpacePanning = true; controls.zoomToCursor = true; controls.zoomSpeed = 3;     // zoom towards the pointer
+const hemi = new THREE.HemisphereLight(0xffffff, 0xbbbbbb, 1.0); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 1.5); sun.position.set(0.4, 0.8, 1); camera.add(sun); scene.add(camera);
+const env = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function setStage() {
+  scene.background = new THREE.Color(real() ? "#ffffff" : (css("--bg") || "#fff"));
+  scene.environment = real() ? env : null;
+  hemi.intensity = real() ? 0.6 : 2.2; sun.intensity = real() ? 1.4 : 1.6;
+  render();
+}
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", setStage);
+let running = false, fly = null;
+function render() { if (!running) { running = true; requestAnimationFrame(tick); } }
+function tick() {
+  const moved = controls.update();
+  if (fly) flyStep();
+  // the exploded stack eases in and out
+  const target = MODE === "exploded" ? 1 : 0, easing = Math.abs(explode - target) > 0.002;
+  if (easing) { explode += (target - explode) * 0.15; if (Math.abs(explode - target) < 0.002) explode = target; layout(); }
+  renderer.render(scene, camera);
+  if (moved || fly || easing) requestAnimationFrame(tick); else running = false;
+}
+controls.addEventListener("change", render);
+function resize() { const w = view.clientWidth, h = view.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); render(); }
+new ResizeObserver(resize).observe(view);
+
+// ---------------------------------------------------------------------
+// Parts: KiCad's GLB (metres, y up, one node per designator). Each part's pieces become one mesh with its colours
+// baked in, and all parts share a handful of materials: a few hundred draw calls and no shader switching.
+// ---------------------------------------------------------------------
+const MAT = {
+  part:  new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.2, side: THREE.DoubleSide }),
+  ghost: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0, transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide }),
+  on:    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0, emissive: ACCENT, emissiveIntensity: 0.9, side: THREE.DoubleSide }),
+  near:  new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0, emissive: NEAR, emissiveIntensity: 0.6, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide }),
+  faded: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide }),
+};
+// focus mode: parts are glass, the one in focus is solid contrast colour, its neighbours a light tint of it
+MAT.glass = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.1, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide });
+MAT.cOn = new THREE.MeshStandardMaterial({ color: CONTRAST, emissive: CONTRAST, emissiveIntensity: 0.55, roughness: 0.5, transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide });
+MAT.cNear = new THREE.MeshStandardMaterial({ color: CONTRAST_SOFT, emissive: CONTRAST, emissiveIntensity: 0.25, roughness: 0.6, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide });
+for (const m of Object.values(MAT)) m.forceSinglePass = true;      // see-through, double-sided, but drawn once
+const parts = new Map();   // ref → { mesh, box }
+const layers = [];         // { mesh, name }: board, mask, silkscreen
+let box = null, boardY = [0, 1.6];
+function layerName(mat) {
+  const c = mat.color, a = mat.opacity;
+  if (c.r > 0.9 && c.g > 0.9 && c.b > 0.9) return "Silkscreen";
+  if (c.g > c.r && a < 0.95) return "Mask";
+  if (c.r > 0.5 && c.g > 0.4 && c.b < 0.15) return "Copper";
+  return "Board";
+}
+function bake(mesh) {
+  const src = mesh.geometry, g = new THREE.BufferGeometry(), n = src.attributes.position.count;
+  g.setAttribute("position", src.attributes.position.clone());
+  if (src.attributes.normal) g.setAttribute("normal", src.attributes.normal.clone());
+  const c = mesh.material.color, col = new Float32Array(n * 3), vc = src.attributes.color;
+  for (let i = 0; i < n; i++) { col[i * 3] = c.r * (vc ? vc.getX(i) : 1); col[i * 3 + 1] = c.g * (vc ? vc.getY(i) : 1); col[i * 3 + 2] = c.b * (vc ? vc.getZ(i) : 1); }
+  g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  g.setIndex(src.index ? src.index.clone() : new THREE.BufferAttribute(Uint32Array.from({ length: n }, (_, i) => i), 1));
+  g.applyMatrix4(mesh.matrixWorld);
+  if (!g.attributes.normal) g.computeVertexNormals();
+  return g;
+}
+const layerPieces = [];
+function adopt(gltf) {
+  const root = gltf.scene; root.scale.setScalar(1000);          // → millimetres, the same as the PCB file
+  scene.add(root); root.updateMatrixWorld(true);
+  let top = root; while (top.children.length === 1 && !top.children[0].isMesh) top = top.children[0];
+  for (const g of [...top.children]) {
+    const meshes = []; g.traverse(o => o.isMesh && meshes.push(o));
+    if (!meshes.length) continue;
+    const isLayer = g.name.startsWith("=>") || !/^[A-Za-z_]+\d/.test(g.name);
+    if (isLayer) { for (const m of meshes) layerPieces.push(m); continue; }
+    const ref = g.name.replace(/_\d+$/, "");
+    const geo = mergeGeometries(meshes.map(bake), false);
+    if (!geo) continue;
+    const mesh = new THREE.Mesh(geo, MAT.part); mesh.userData.ref = ref; scene.add(mesh);
+    mesh.renderOrder = 2.5;                              // after the (see-through) mask and silkscreen, before lit copper
+    g.parent.remove(g); for (const m of meshes) m.geometry.dispose();
+    geo.computeBoundingBox(); parts.set(ref, { mesh, box: geo.boundingBox.clone() });
+  }
+  // board layers arrive as thousands of pieces (every silkscreen glyph is one): one mesh per layer and colour
+  const byLook = new Map();
+  for (const m of layerPieces) { const k = layerName(m.material) + m.material.color.getHexString() + m.material.opacity; (byLook.get(k) || byLook.set(k, []).get(k)).push(m); }
+  for (const list of byLook.values()) {
+    const src = list[0].material, geo = mergeGeometries(list.map(m => { const g = bake(m); g.deleteAttribute("color"); return g; }), false); if (!geo) continue;
+    const mat = new THREE.MeshStandardMaterial({ color: src.color, opacity: src.opacity, transparent: src.opacity < 1, roughness: src.roughness, metalness: src.metalness, side: THREE.DoubleSide, forceSinglePass: true });
+    mat.userData.base = { color: src.color.clone(), opacity: src.opacity };
+    const mesh = new THREE.Mesh(geo, mat); scene.add(mesh); layers.push({ mesh, name: layerName(mat) });
+    mesh.renderOrder = { Mask: 1, Silkscreen: 2 }[layerName(mat)] || 0;
+  }
+  scene.remove(root);
+  const b = layers.filter(l => l.name === "Board").map(l => new THREE.Box3().setFromObject(l.mesh)).reduce((a, x) => a.union(x), new THREE.Box3());
+  if (!b.isEmpty()) boardY = [b.min.y, b.max.y];
+  box = new THREE.Box3().setFromObject(scene);
+}
+
+// ---------------------------------------------------------------------
+// Copper as flat textures: one plane per copper layer (top, inner 1, inner 2, bottom), a highlight plane per layer,
+// and a hidden "ID map" per layer that says which net is under any point (for hovering).
+// Vias are real barrels through the board (one instanced mesh), with their drill holes in the copper.
+// ---------------------------------------------------------------------
+const PPM = 20;                     // texture pixels per millimetre (less if the GPU's textures are smaller)
+const CU_LAYERS = ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"];
+const LAYER_LABEL = { "F.Cu": "top copper", "In1.Cu": "inner layer 1", "In2.Cu": "inner layer 2", "B.Cu": "bottom copper" };
+let CU = null;                      // { data, bounds, ppm, w, h, nets, planes, overlay, ids, vias, viaMesh, labels }
+function drawCopper(ctx, g, style) {
+  ctx.fillStyle = ctx.strokeStyle = style; ctx.lineCap = "round";
+  const s = g.s; for (let i = 0; i < s.length; i += 5) { ctx.lineWidth = s[i + 4]; ctx.beginPath(); ctx.moveTo(s[i], s[i + 1]); ctx.lineTo(s[i + 2], s[i + 3]); ctx.stroke(); }
+  const c = g.c; ctx.beginPath(); for (let i = 0; i < c.length; i += 3) { ctx.moveTo(c[i] + c[i + 2], c[i + 1]); ctx.arc(c[i], c[i + 1], c[i + 2], 0, Math.PI * 2); } ctx.fill();
+  for (const p of g.p) { ctx.beginPath(); ctx.moveTo(p[0], p[1]); for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i], p[i + 1]); ctx.closePath(); ctx.fill(); }
+}
+// vias reach every layer: a ring of copper, and (where it is seen) the drill hole in it
+function drawVias(ctx, list, style, holes) {
+  ctx.fillStyle = style; ctx.beginPath();
+  for (const v of list) { ctx.moveTo(v[0] + v[2], v[1]); ctx.arc(v[0], v[1], v[2], 0, Math.PI * 2); } ctx.fill();
+  if (!holes) return;
+  ctx.fillStyle = "#1b1b1b"; ctx.beginPath();
+  for (const v of list) { ctx.moveTo(v[0] + v[3], v[1]); ctx.arc(v[0], v[1], v[3], 0, Math.PI * 2); } ctx.fill();
+}
+const geomsOn = (net, layer) => { const g = (CU.data.nets[net] || {})[layer]; return g ? [g] : []; };
+function canvas2d() {
+  const cv = document.createElement("canvas"); cv.width = CU.w; cv.height = CU.h;
+  const ctx = cv.getContext("2d"); ctx.setTransform(CU.ppm, 0, 0, CU.ppm, -CU.bounds[0] * CU.ppm, -CU.bounds[1] * CU.ppm);
+  return { cv, ctx };
+}
+function plane(material) {
+  const [x0, z0, x1, z1] = CU.bounds, g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute([x0, 0, z0, x1, 0, z0, x1, 0, z1, x0, 0, z1], 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute([0, 1, 1, 1, 1, 0, 0, 0], 2));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0], 3));
+  g.setIndex([0, 2, 1, 0, 3, 2]);
+  const m = new THREE.Mesh(g, material); scene.add(m); return m;
+}
+const tex = cv => { const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); return t; };
+// a "+" for the part in focus: dark cross with a white edge, readable on the red board and on cyan parts
+let PLUS_TEX = null;
+function plusMarker() {
+  if (!PLUS_TEX) {
+    const cv = document.createElement("canvas"); cv.width = cv.height = 64; const g = cv.getContext("2d");
+    g.lineCap = "butt";
+    for (const [w, col] of [[6, "rgba(255,255,255,0.9)"], [2.5, "#111"]]) { g.strokeStyle = col; g.lineWidth = w; g.beginPath(); g.moveTo(32, 6); g.lineTo(32, 58); g.moveTo(6, 32); g.lineTo(58, 32); g.stroke(); }
+    PLUS_TEX = tex(cv);
+  }
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: PLUS_TEX, depthTest: false, transparent: true, sizeAttenuation: false }));
+  sp.scale.set(0.018, 0.018, 1); sp.renderOrder = 9; return sp;
+}
+// a test point's name: black text on a white tag, always facing the camera, a constant size on the screen
+function nameTag(text) {
+  const cv = document.createElement("canvas"), ctx = cv.getContext("2d"), px = 40, pad = 10;
+  ctx.font = `500 ${px}px "IBM Plex Mono", monospace`; cv.width = Math.ceil(ctx.measureText(text).width) + pad * 2; cv.height = Math.round(px * 1.45);
+  ctx.fillStyle = "rgba(255,255,255,0.92)"; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.font = `500 ${px}px "IBM Plex Mono", monospace`; ctx.fillStyle = "#111"; ctx.textBaseline = "middle"; ctx.fillText(text, pad, cv.height / 2 + 1);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex(cv), depthTest: false, transparent: true, sizeAttenuation: false }));
+  const h = 0.032; sp.scale.set(h * cv.width / cv.height, h, 1); sp.renderOrder = 8; return sp;
+}
+function textSprite(text) {
+  const cv = document.createElement("canvas"), ctx = cv.getContext("2d"), px = 48;
+  ctx.font = `500 ${px}px "IBM Plex Sans", sans-serif`; cv.width = Math.ceil(ctx.measureText(text).width) + 16; cv.height = px * 1.4;
+  ctx.font = `500 ${px}px "IBM Plex Sans", sans-serif`; ctx.fillStyle = "#6e6e6a"; ctx.textBaseline = "middle"; ctx.fillText(text, 8, cv.height / 2);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex(cv), depthTest: false, transparent: true }));
+  const h = 2.2; sp.scale.set(h * cv.width / cv.height, h, 1); sp.renderOrder = 5; scene.add(sp); return sp;
+}
+// copper as triangles (2D vectors on a plane): tracks with round ends, round and rectangular pads, pours, via rings.
+// Kept per net and layer, split into "small" (tracks, pads, vias) and "pour" (large areas), so a highlight can be
+// assembled from exactly the nets in focus; the GPU's own antialiasing keeps every edge sharp at any zoom.
+const POUR = 4;                      // mm²: a polygon bigger than this is a pour, not a pad
+function triangulate(g, small, pour) {
+  const tri = (out, ax, ay, bx, by, cx, cy) => out.push(ax, ay, bx, by, cx, cy);
+  const fan = (out, cx, cy, r, n) => { for (let i = 0; i < n; i++) { const a0 = i / n * Math.PI * 2, a1 = (i + 1) / n * Math.PI * 2; tri(out, cx, cy, cx + r * Math.cos(a0), cy + r * Math.sin(a0), cx + r * Math.cos(a1), cy + r * Math.sin(a1)); } };
+  const s = g.s; for (let i = 0; i < s.length; i += 5) {
+    const x1 = s[i], y1 = s[i + 1], x2 = s[i + 2], y2 = s[i + 3], w = s[i + 4], l = Math.hypot(x2 - x1, y2 - y1) || 1e-6, nx = -(y2 - y1) / l * w / 2, ny = (x2 - x1) / l * w / 2;
+    tri(small, x1 + nx, y1 + ny, x2 + nx, y2 + ny, x2 - nx, y2 - ny); tri(small, x1 + nx, y1 + ny, x2 - nx, y2 - ny, x1 - nx, y1 - ny);
+    const n = w > 0.5 ? 16 : 10; fan(small, x1, y1, w / 2, n); fan(small, x2, y2, w / 2, n);
+  }
+  const c = g.c; for (let i = 0; i < c.length; i += 3) fan(small, c[i], c[i + 1], c[i + 2], c[i + 2] > 0.5 ? 24 : 16);
+  for (const p of g.p) {
+    const pts = []; let area = 0;
+    for (let i = 0; i < p.length; i += 2) pts.push(new THREE.Vector2(p[i], p[i + 1]));
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) area += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
+    const out = Math.abs(area / 2) > POUR ? pour : small;
+    for (const [a, b, cc] of THREE.ShapeUtils.triangulateShape(pts, [])) tri(out, pts[a].x, pts[a].y, pts[b].x, pts[b].y, pts[cc].x, pts[cc].y);
+  }
+}
+function viaRings(list, out) {        // a ring of copper around each drill hole
+  for (const v of list) { const n = 16, [x, y, r, d] = v;
+    for (let i = 0; i < n; i++) { const a0 = i / n * Math.PI * 2, a1 = (i + 1) / n * Math.PI * 2, c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+      out.push(x + r * c0, y + r * s0, x + d * c0, y + d * s0, x + r * c1, y + r * s1, x + d * c0, y + d * s0, x + d * c1, y + d * s1, x + r * c1, y + r * s1); } }
+}
+// a flat mesh at height 0 (layout() moves it) from 2D triangles, optionally with one colour per run of triangles
+function flatMesh(runs, material) {
+  let n = 0; for (const [xy] of runs) n += xy.length / 2;
+  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = runs.some(r => r[1]) ? new Float32Array(n * 3) : null;
+  let k = 0;
+  for (const [xy, c] of runs) for (let i = 0; i < xy.length; i += 2, k++) { pos[k * 3] = xy[i]; pos[k * 3 + 2] = xy[i + 1]; nor[k * 3 + 1] = 1; if (col && c) { col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b; } }
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+  if (col) g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  const m = new THREE.Mesh(g, material); scene.add(m); return m;
+}
+function buildCopper(data) {
+  // the extent of all copper, a little padded
+  const b = [Infinity, Infinity, -Infinity, -Infinity], grow = (x, y) => { if (x < b[0]) b[0] = x; if (y < b[1]) b[1] = y; if (x > b[2]) b[2] = x; if (y > b[3]) b[3] = y; };
+  for (const per of Object.values(data.nets)) for (const g of Object.values(per)) { for (let i = 0; i < g.s.length; i += 5) { grow(g.s[i], g.s[i + 1]); grow(g.s[i + 2], g.s[i + 3]); } for (let i = 0; i < g.c.length; i += 3) grow(g.c[i], g.c[i + 1]); for (const p of g.p) for (let i = 0; i < p.length; i += 2) grow(p[i], p[i + 1]); }
+  b[0] -= 1; b[1] -= 1; b[2] += 1; b[3] += 1;
+  const max = Math.min(renderer.capabilities.maxTextureSize, 8192), ppm = Math.min(PPM, max / (b[2] - b[0]), max / (b[3] - b[1]));
+  const vias = data.vias || [], viasOf = new Map();
+  for (const v of vias) (viasOf.get(v[4]) || viasOf.set(v[4], []).get(v[4])).push(v);
+  CU = { viaShown: vias.map(() => true), data, bounds: b, ppm, w: Math.ceil((b[2] - b[0]) * ppm), h: Math.ceil((b[3] - b[1]) * ppm),
+         nets: Object.keys(data.nets), planes: {}, meshes: {}, lit: {}, tris: {}, ids: {}, vias, viasOf, labels: {} };
+  for (const v of vias) if (!data.nets[v[4]]) CU.nets.push(v[4]);
+  for (const L of CU_LAYERS) {
+    // the copper of every net on this layer, as triangles
+    const per = CU.tris[L] = new Map(), all = [];
+    for (const net of CU.nets) {
+      const small = [], pour = [];
+      for (const g of geomsOn(net, L)) triangulate(g, small, pour);
+      viaRings(viasOf.get(net) || [], small);
+      if (small.length || pour.length) { per.set(net, { small: new Float32Array(small), pour: new Float32Array(pour) }); all.push([per.get(net).small], [per.get(net).pour]); }
+    }
+    CU.meshes[L] = flatMesh(all, new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, forceSinglePass: true }));
+    CU.meshes[L].renderOrder = 0;                                   // under the mask, which is drawn after it
+    // the highlight mesh, rebuilt for each focus
+    // drawn over everything: a lit track on an inner or bottom layer keeps its colour instead of showing through the board
+    CU.lit[L] = flatMesh([], new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, forceSinglePass: true, depthTest: false, depthWrite: false, transparent: true, opacity: 0.8 }));
+    // (transparent, so it is drawn in the second pass after the see-through mask instead of before it)
+    CU.lit[L].renderOrder = 3; CU.lit[L].visible = false;
+    // for hovering: an invisible quad over the layer, and an ID map with every net in its own colour
+    const quad = plane(new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide })); quad.userData.layer = L; CU.planes[L] = quad;
+    const id = canvas2d();
+    CU.nets.forEach((net, i) => { const k = i + 1, col = `rgb(${k & 255},${(k >> 8) & 255},${(k >> 16) & 255})`;
+      for (const g of geomsOn(net, L)) drawCopper(id.ctx, g, col); drawVias(id.ctx, viasOf.get(net) || [], col, false); });
+    CU.ids[L] = id.ctx.getImageData(0, 0, CU.w, CU.h).data;
+    CU.labels[L] = textSprite(LAYER_LABEL[L]); CU.labels[L].visible = false;
+  }
+  // via barrels: one instanced cylinder per via, coloured per instance
+  const cyl = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true);
+  CU.viaMesh = new THREE.InstancedMesh(cyl, new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.6, roughness: 0.4, side: THREE.DoubleSide }), vias.length);
+  CU.viaMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(vias.length * 3), 3);
+  CU.viaMesh.userData.vias = true; scene.add(CU.viaMesh);
+}
+function netAt(L, uv) {
+  const x = Math.floor(uv.x * CU.w), y = Math.floor((1 - uv.y) * CU.h);
+  if (x < 0 || y < 0 || x >= CU.w || y >= CU.h) return null;
+  const d = CU.ids[L], i = (y * CU.w + x) * 4;
+  if (d[i + 3] < 250) return null;                      // an anti-aliased edge: no clear answer
+  const id = d[i] | (d[i + 1] << 8) | (d[i + 2] << 16);
+  return id ? CU.nets[id - 1] : null;
+}
+// colour, opacity, metalness, roughness per layer and mode (engineering and exploded: Schematik's layer colours)
+const COPPER_LOOK = {
+  focus:       { "F.Cu": [0xc9962e, 1, 0.85, 0.35], "In1.Cu": [0xc9962e, 1, 0.6, 0.5], "In2.Cu": [0xc9962e, 1, 0.6, 0.5], "B.Cu": [0xc9962e, 1, 0.85, 0.35] },
+  realistic:   { "F.Cu": [0xc9962e, 1, 0.85, 0.35], "In1.Cu": [0xc9962e, 1, 0.6, 0.5], "In2.Cu": [0xc9962e, 1, 0.6, 0.5], "B.Cu": [0xc9962e, 1, 0.85, 0.35] },
+  engineering: { "F.Cu": [0xd64541, 0.55, 0, 0.6], "In1.Cu": [0xe8a23a, 0.35, 0, 0.6], "In2.Cu": [0x38b8a4, 0.35, 0, 0.6], "B.Cu": [0x3d7be0, 0.55, 0, 0.6] },
+  exploded:    { "F.Cu": [0xd64541, 0.6, 0, 0.6], "In1.Cu": [0xe8a23a, 0.6, 0, 0.6], "In2.Cu": [0x38b8a4, 0.6, 0, 0.6], "B.Cu": [0x3d7be0, 0.6, 0, 0.6] },
+};
+const VIA_COLOR = { focus: new THREE.Color(0xc9962e), realistic: new THREE.Color(0xc9962e), engineering: new THREE.Color(0x8d8c87), exploded: new THREE.Color(0x8d8c87) };
+// which copper layers are shown: the buttons in the bar; each mode starts with its own set
+const SHOW = {};
+const defaultShow = () => { for (const L of CU_LAYERS) SHOW[L] = !real() || L === "F.Cu" || L === "B.Cu"; };
+
+// ---------------------------------------------------------------------
+// The stack: where each layer sits. Exploded pulls it apart (eased), so vias show as the lines between layers.
+// ---------------------------------------------------------------------
+let explode = 0;
+const EXPLODE_AT = { "F.Cu": 7, "In1.Cu": 2.5, "In2.Cu": -2.5, "B.Cu": -7 };
+function layerY(L, e = explode) {
+  const t = boardY[1] - boardY[0], mid = (boardY[0] + boardY[1]) / 2;
+  const flat = { "F.Cu": boardY[1] + 0.025, "In1.Cu": boardY[1] - t / 3, "In2.Cu": boardY[0] + t / 3, "B.Cu": boardY[0] - 0.025 }[L];
+  return flat + e * (mid + EXPLODE_AT[L] - flat);
+}
+function layout() {
+  if (!CU) return;
+  for (const L of CU_LAYERS) {
+    const y = layerY(L);
+    CU.planes[L].position.y = y; CU.meshes[L].position.y = y;
+    CU.lit[L].position.y = y + (L === "B.Cu" ? -0.12 : L === "F.Cu" ? 0.12 : 0.03);     // over the mask on the outer layers
+    CU.labels[L].position.set(CU.bounds[0] - 1, y, CU.bounds[1] + 4); CU.labels[L].center.set(1, 0.5);
+    CU.labels[L].visible = explode > 0.6 && SHOW[L];
+  }
+  // parts ride on the top layer, a little above it when exploded
+  const lift = layerY("F.Cu") - layerY("F.Cu", 0) + explode * 3;
+  for (const p of parts.values()) p.mesh.position.y = lift;
+  // via barrels span from the bottom to the top copper
+  const y0 = layerY("B.Cu"), y1 = layerY("F.Cu"), m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
+  CU.vias.forEach((v, i) => { const r = CU.viaShown[i] ? Math.max(v[3], v[2] * 0.6) : 0; m.compose(pos.set(v[0], (y0 + y1) / 2, v[1]), q, sc.set(r, r ? y1 - y0 : 0, r)); CU.viaMesh.setMatrixAt(i, m); });
+  CU.viaMesh.instanceMatrix.needsUpdate = true; CU.viaMesh.computeBoundingSphere();
+}
+
+// ---------------------------------------------------------------------
+// Looks per mode, and focus on top
+// ---------------------------------------------------------------------
+function setOpacity(m, o) { const t = o < 1; m.opacity = o; if (m.transparent !== t) { m.transparent = t; m.depthWrite = !t; m.needsUpdate = true; } }
+function applyMode() {
+  setStage(); defaultShow(); layerButtons();
+  document.querySelectorAll("[data-mode]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === MODE)));
+  highlight(current());
+}
+function layerButtons() {
+  document.querySelectorAll("[data-layer]").forEach(b => b.setAttribute("aria-pressed", String(!!SHOW[b.dataset.layer])));
+}
+
+// ---------------------------------------------------------------------
+// Selection: { kind: "part"|"net", parts, nets, near }
+// part in focus → the part orange, its copper and its neighbours blue; net in focus → the copper orange, its parts blue
+// ---------------------------------------------------------------------
+let info = null;
+const netsOf = new Map(), partsOn = new Map();
+let hover = null, pinned = null;
+const current = () => hover || pinned;
+const isRail = n => (partsOn.get(n) || []).length > 12;          // supplies and ground: not "one connection away"
+function partSel(ref) {
+  const nets = new Set(netsOf.get(ref) || []), near = new Set();
+  for (const n of nets) if (!isRail(n)) for (const r of partsOn.get(n) || []) if (r !== ref) near.add(r);
+  return { kind: "part", parts: new Set([ref]), nets, near };
+}
+function netSel(net) { return { kind: "net", parts: new Set(), nets: new Set([net]), near: new Set(partsOn.get(net) || []) }; }
+const selKey = s => s ? s.kind + [...s.parts].join() + "|" + [...s.nets].join() : "";
+const litColor = (sel, net) => !sel || !sel.nets.has(net) ? null
+  : MODE === "focus" ? (sel.kind === "part" && isRail(net) ? CONTRAST_SOFT : CONTRAST)
+  : sel.kind === "net" ? "#e8590c" : isRail(net) ? "#8db7e8" : "#1c7ed6";
+const inBox = (b, x, y) => !!b && x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3];
+function nearOnly(xy, b) {               // the triangles with a corner inside the box
+  if (!b) return new Float32Array(0);
+  const out = []; for (let i = 0; i < xy.length; i += 6) if (inBox(b, xy[i], xy[i + 1]) || inBox(b, xy[i + 2], xy[i + 3]) || inBox(b, xy[i + 4], xy[i + 5])) for (let k = 0; k < 6; k++) out.push(xy[i + k]);
+  return new Float32Array(out);
+}
+const RAIL_PART = (sel, net) => sel.kind === "part" && isRail(net);       // a part's ground and supplies: their tracks and vias, not every pour
+// ground in focus touches almost everything: it is shown at a tenth of the usual strength, so the board stays readable
+const isGroundNet = n => /(^|\/)GND$/i.test(n);
+const groundFocus = sel => !!sel && sel.kind === "net" && [...sel.nets].every(isGroundNet);
+const LIT_OPACITY = 0.8, GROUND_FACTOR = 0.1;
+function highlight(sel) {
+  const litO = groundFocus(sel) ? LIT_OPACITY * GROUND_FACTOR : LIT_OPACITY;
+  const eng = !real(), inner = SHOW["In1.Cu"] || SHOW["In2.Cu"], focus = MODE === "focus";
+  // focus mode: parts are solid until something is in focus; then the rest turns to glass
+  const gf = groundFocus(sel);
+  for (const [ref, p] of parts) p.mesh.material = focus && gf ? MAT.glass : focus ? (!sel ? MAT.part : sel.parts.has(ref) ? MAT.cOn : sel.near.has(ref) ? MAT.cNear : MAT.glass)
+    : !sel ? (eng ? MAT.ghost : MAT.part) : sel.parts.has(ref) ? MAT.on : sel.near.has(ref) ? MAT.near : MAT.faded;
+  if (CU) {
+    // around a part in focus: its ground and supplies only within a few millimetres of it
+    const near = sel && sel.kind === "part" ? [...sel.parts].map(r => parts.get(r)).filter(Boolean).reduce((b, p) => [Math.min(b[0], p.box.min.x - 6), Math.min(b[1], p.box.min.z - 6), Math.max(b[2], p.box.max.x + 6), Math.max(b[3], p.box.max.z + 6)], [Infinity, Infinity, -Infinity, -Infinity]) : null;
+    for (const L of CU_LAYERS) {
+      const mesh = CU.meshes[L], look = COPPER_LOOK[MODE][L], m = mesh.material;
+      mesh.visible = SHOW[L]; CU.planes[L].visible = SHOW[L] || !!sel;
+      m.color.set(look[0]); m.metalness = look[2]; m.roughness = look[3];
+      const o = sel && !focus ? Math.min(look[1], 0.22) : look[1]; m.opacity = o; m.transparent = o < 1; m.depthWrite = o === 1; m.needsUpdate = true;
+      // the lit nets on this layer: a new little mesh (only what is in focus, so it is quick)
+      const runs = [];
+      if (sel) for (const net of sel.nets) { const col = litColor(sel, net), t = CU.tris[L].get(net); if (!col || !t) continue;
+        const c = new THREE.Color(col);
+        if (RAIL_PART(sel, net)) { runs.push([nearOnly(t.small, near), c]); continue; }
+        runs.push([t.small, c], [t.pour, c]); }
+      const lit = CU.lit[L]; lit.geometry.dispose(); lit.material.opacity = litO;
+      const fresh = flatMesh(runs, lit.material); lit.geometry = fresh.geometry; scene.remove(fresh);
+      lit.visible = runs.some(r => r[0].length);                 // a lit net shows on every layer it uses, shown or not
+    }
+    // via barrels: lit ones in the focus colour, the rest quiet
+    const base = VIA_COLOR[MODE], dim = new THREE.Color(0x5a5a56), c = new THREE.Color();
+    // with something in focus only its vias stay
+    CU.viaShown = CU.vias.map(v => !sel || (!gf && !!litColor(sel, v[4]) && (!RAIL_PART(sel, v[4]) || inBox(near, v[0], v[1]))));
+    CU.vias.forEach((v, i) => { const col = litColor(sel, v[4]); CU.viaMesh.setColorAt(i, col ? c.set(col) : sel ? dim : base); });
+    CU.viaMesh.instanceColor.needsUpdate = true;
+    CU.viaMesh.visible = !real() || !!sel || inner;
+    terminals(sel, near, litO);
+  }
+  // board, mask and silkscreen: solid in realistic view; they step back while something is in focus or an inner layer is on,
+  // so lit copper inside the board and the vias through it show
+  // focus mode leaves the board alone: the lit copper is drawn over it anyway
+  const see = (!!sel && !focus) || inner;
+  for (const { mesh, name } of layers) {
+    const m = mesh.material, B = m.userData.base;
+    mesh.visible = name !== "Copper" && (real() || name === "Board") && !(MODE === "exploded" && name !== "Board");
+    if (name === "Mask") m.color.set(real() ? RED_MASK : B.color);          // this board is red
+    const dim = focus && !!sel;                                   // focus mode, something in focus: the board a bit see-through
+    if (name === "Board") { if (eng) m.color.set(0x3a3a3a); else m.color.copy(B.color); setOpacity(m, MODE === "exploded" ? 0.08 : eng ? 0.3 : see ? 0.35 : dim ? 0.6 : B.opacity); }
+    else setOpacity(m, see ? 0.25 : dim ? (name === "Mask" ? 0.6 : 0.5) : name === "Mask" && real() ? 0.92 : B.opacity);
+  }
+  layout();
+  render();
+}
+// ---------------------------------------------------------------------
+// Footprints from the PCB: blocks for parts whose 3D model is missing, not-fitted parts hidden,
+// and (per focus) their copper terminals and test-point markers
+// ---------------------------------------------------------------------
+const FP = new Map();                  // ref → footprint { x, y, side, box, pads: [[x, y, w, h, angle, shape, net]] }
+const NOT_FITTED = new Set();
+function footprintParts(fps) {
+  const top = boardY[1] + 0.05, bot = boardY[0] - 0.05;
+  for (const f of fps) {
+    FP.set(f.r, f);
+    const P = info && info.parts[f.r];
+    if (f.dnp || (P && /^(NC|DNP|DNF|n\.?c\.?)$/i.test(P.v || ""))) NOT_FITTED.add(f.r);
+    if (parts.has(f.r) || /^(TP|MH|MK|Teufel)/.test(f.r) || !P) continue;
+    // no 3D model in the export: a plain dark block over its courtyard, 1 mm high
+    const [x0, z0, x1, z1] = f.box, h = 1, g = new THREE.BoxGeometry(Math.max(0.3, x1 - x0), h, Math.max(0.3, z1 - z0));
+    g.translate((x0 + x1) / 2, f.side === "B" ? bot - h / 2 : top + h / 2, (z0 + z1) / 2);
+    const n = g.attributes.position.count, col = new Float32Array(n * 3).fill(0.16); g.setAttribute("color", new THREE.BufferAttribute(col, 3)); g.deleteAttribute("uv");
+    const mesh = new THREE.Mesh(g, MAT.part); mesh.userData.ref = f.r; mesh.userData.block = true; mesh.renderOrder = 2.5; scene.add(mesh);
+    g.computeBoundingBox(); parts.set(f.r, { mesh, box: g.boundingBox.clone() });
+  }
+  for (const r of NOT_FITTED) if (parts.has(r)) parts.get(r).mesh.visible = false;
+  const blocks = [...parts.values()].filter(p => p.mesh.userData.block).length;
+  status.dataset.extra = `${blocks} drawn as blocks (no 3D model) · ${NOT_FITTED.size} not fitted, hidden`;
+}
+// the pads of what is in focus, raised a little and drawn over everything (also through a connector's body),
+// and a marker standing on each test point in focus
+// A part's model, split into its connected pieces (each pin of a header, each end cap of a resistor is one piece).
+// A piece that sits on pads of exactly one net is that net's terminal; the body covers pads of several nets and is not.
+const PAD_SLACK = 0.2;
+function padBox(q) { const [x, y, w, h, ang] = q, turn = Math.round(ang / 90) % 2 !== 0, hw = (turn ? h : w) / 2 + PAD_SLACK, hh = (turn ? w : h) / 2 + PAD_SLACK; return [x - hw, y - hh, x + hw, y + hh]; }
+function terminalsOf(ref) {
+  const p = parts.get(ref), f = FP.get(ref);
+  if (!p || !f) return null;
+  if (p.terms) return p.terms;
+  const g = p.mesh.geometry, pos = g.attributes.position, idx = g.index ? g.index.array : null, nTri = (idx ? idx.length : pos.count) / 3;
+  const at = i => idx ? idx[i] : i;
+  // vertices at the same spot are one vertex (models repeat them per face), then union-find over triangles
+  const id = new Int32Array(pos.count), seen = new Map();
+  // …and of the same colour: a gold pin touching a black housing stays a piece of its own
+  const colr = g.attributes.color;
+  for (let v = 0; v < pos.count; v++) { const k = Math.round(pos.getX(v) * 500) + "," + Math.round(pos.getY(v) * 500) + "," + Math.round(pos.getZ(v) * 500) + (colr ? "|" + Math.round(colr.getX(v) * 50) + "," + Math.round(colr.getY(v) * 50) + "," + Math.round(colr.getZ(v) * 50) : ""); let i = seen.get(k); if (i === undefined) seen.set(k, i = seen.size); id[v] = i; }
+  const parent = new Int32Array(seen.size).map((_, i) => i), find = a => { while (parent[a] !== a) a = parent[a] = parent[parent[a]]; return a; };
+  for (let t = 0; t < nTri; t++) { const a = find(id[at(t * 3)]), b = find(id[at(t * 3 + 1)]), c = find(id[at(t * 3 + 2)]); parent[b] = a; parent[find(c)] = a; }
+  const comps = new Map(), triComp = new Int32Array(nTri);
+  for (let t = 0; t < nTri; t++) {
+    const r = find(id[at(t * 3)]); triComp[t] = r;
+    let c = comps.get(r);
+    if (!c) { const v0 = at(t * 3); comps.set(r, c = { box: [Infinity, Infinity, -Infinity, -Infinity], y: [Infinity, -Infinity], tris: [], col: colr ? [colr.getX(v0), colr.getY(v0), colr.getZ(v0)] : [0, 0, 0] }); }
+    c.tris.push(t);
+    for (let k = 0; k < 3; k++) { const v = at(t * 3 + k), x = pos.getX(v), y = pos.getY(v), z = pos.getZ(v); if (x < c.box[0]) c.box[0] = x; if (z < c.box[1]) c.box[1] = z; if (x > c.box[2]) c.box[2] = x; if (z > c.box[3]) c.box[3] = z; if (y < c.y[0]) c.y[0] = y; if (y > c.y[1]) c.y[1] = y; }
+  }
+  // which pads does each piece touch? only its points close to the board surface count (a pin's foot, a cap's end),
+  // not its outline: an angled pin's outline reaches over its neighbours' pads
+  const pads = f.pads.filter(q => q[6]).map(q => ({ box: padBox(q), net: q[6] }));
+  const surf = f.side === "B" ? boardY[0] : boardY[1], lift = p.mesh.position.y, NEAR = 0.8;
+  const touch = new Map();
+  for (let t = 0; t < nTri; t++) for (let k = 0; k < 3; k++) {
+    const v = at(t * 3 + k), y = pos.getY(v) + lift; if (Math.abs(y - surf) > NEAR) continue;
+    const x = pos.getX(v), z = pos.getZ(v);
+    for (const q of pads) if (x >= q.box[0] && x <= q.box[2] && z >= q.box[1] && z <= q.box[3]) { const r = triComp[t]; (touch.get(r) || touch.set(r, new Set()).get(r)).add(q.net); }
+  }
+  for (const [r, c] of comps) { const nets = touch.get(r); c.net = nets && nets.size === 1 ? [...nets][0] : null; }
+  // the rest of a pin: pieces of the same metal that touch a pin piece (its top, a contact inside the housing) take its net;
+  // failing that, the pin piece it stands over most. Repeated, so chains of pieces get there. A piece over pins of two
+  // different nets (a housing, a shield) stays out.
+  const sameCol = (a, b) => Math.abs(a.col[0] - b.col[0]) + Math.abs(a.col[1] - b.col[1]) + Math.abs(a.col[2] - b.col[2]) < 0.06;
+  const gap = (a, b) => Math.max(0, a.box[0] - b.box[2], b.box[0] - a.box[2], a.box[1] - b.box[3], b.box[1] - a.box[3], a.y[0] - b.y[1], b.y[0] - a.y[1]);
+  const xzOver = (a, b) => Math.max(0, Math.min(a.box[2], b.box[2]) - Math.max(a.box[0], b.box[0])) * Math.max(0, Math.min(a.box[3], b.box[3]) - Math.max(a.box[1], b.box[1]));
+  for (let pass = 0; pass < 4; pass++) {
+    const named = [...comps.values()].filter(c => c.net);
+    let changed = false;
+    for (const c of comps.values()) {
+      if (c.net) continue;
+      const cand = named.filter(n => sameCol(c, n));
+      if (!cand.length) continue;
+      const touching = cand.filter(n => gap(c, n) <= 0.08);
+      let pick = null;
+      if (touching.length) { const nets = new Set(touching.map(n => n.net)); if (nets.size === 1) pick = touching[0]; }
+      else {
+        const area = (c.box[2] - c.box[0]) * (c.box[3] - c.box[1]) || 1e-6;
+        const ov = cand.map(n => [n, xzOver(c, n)]).filter(([, a]) => a > 0).sort((a, b) => b[1] - a[1]);
+        if (ov.length && !(ov.length > 1 && ov[1][0].net !== ov[0][0].net && ov[1][1] > area * 0.3)) pick = ov[0][0];
+      }
+      if (pick) { c.net = pick.net; changed = true; }
+    }
+    if (!changed) break;
+  }
+  // a model that is one piece in one colour (pins and housing as a single mesh, like P5M): nothing above can split it,
+  // so each pad gets the slice of the model that stands on it (every triangle whose centre lies over the pad)
+  if (![...comps.values()].some(c => c.net)) {
+    pads.forEach((q, i) => {
+      const key = "pad" + i, c = { box: q.box.slice(), y: [Infinity, -Infinity], tris: [], col: [0, 0, 0], net: q.net };
+      for (let t = 0; t < nTri; t++) {
+        let x = 0, z = 0; for (let k = 0; k < 3; k++) { const v = at(t * 3 + k); x += pos.getX(v); z += pos.getZ(v); }
+        x /= 3; z /= 3;
+        if (x >= q.box[0] && x <= q.box[2] && z >= q.box[1] && z <= q.box[3]) { c.tris.push(t); triComp[t] = -1 - i; }
+      }
+      if (c.tris.length) comps.set(-1 - i, c);
+    });
+  }
+  p.terms = { triComp, comps };
+  return p.terms;
+}
+// the net of the pin under the pointer, if the piece of the model that was hit is a terminal
+function pinNetAt(ref, faceIndex) {
+  const T = terminalsOf(ref); if (!T || faceIndex == null) return null;
+  const c = T.comps.get(T.triComp[faceIndex]); return c && c.net;
+}
+// the lit terminals of every part on the lit nets, as one mesh in the focus colours (seen through the glass parts)
+function litTerminals(sel, near) {
+  const pos = [], col = [], c = new THREE.Color();
+  for (const [ref, f] of FP) {
+    if (NOT_FITTED.has(ref) || !parts.has(ref) || !parts.get(ref).mesh.visible) continue;
+    const whole = sel.parts.has(ref);
+    if (!whole && !f.pads.some(q => q[6] && litColor(sel, q[6]))) continue;
+    const T = terminalsOf(ref); if (!T) continue;
+    const mesh = parts.get(ref).mesh, g = mesh.geometry, P = g.attributes.position, idx = g.index ? g.index.array : null, lift = mesh.position.y;
+    for (const comp of T.comps.values()) {
+      if (!comp.net) continue;
+      const lc = litColor(sel, comp.net) || (whole ? CONTRAST : null); if (!lc) continue;
+      if (!whole && sel.kind === "part" && isRail(comp.net) && !inBox(near, (comp.box[0] + comp.box[2]) / 2, (comp.box[1] + comp.box[3]) / 2)) continue;
+      c.set(lc);
+      for (const t of comp.tris) for (let k = 0; k < 3; k++) { const v = idx ? idx[t * 3 + k] : t * 3 + k; pos.push(P.getX(v), P.getY(v) + lift, P.getZ(v)); col.push(c.r, c.g, c.b); }
+    }
+  }
+  if (!pos.length) return null;
+  const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3)); geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, depthTest: false, depthWrite: false, transparent: true, opacity: 0.8, side: THREE.DoubleSide }));
+  m.renderOrder = 6; return m;
+}
+let TERM = null;
+function terminals(sel, near, litO = 0.8) {
+  if (TERM) { scene.remove(TERM); TERM.traverse(o => o.geometry && o.geometry.dispose()); TERM = null; }
+  if (!sel || !FP.size) return;
+  TERM = new THREE.Group(); scene.add(TERM);
+  const pins = litTerminals(sel, near); if (pins) { pins.material.opacity = litO; TERM.add(pins); }
+  const boxes = [], markers = [];
+  for (const [ref, f] of FP) {
+    if (NOT_FITTED.has(ref)) continue;
+    const whole = sel.parts.has(ref);
+    for (const q of f.pads) {
+      const [x, y, w, h, ang, shape, net] = q;
+      const col = whole ? (litColor(sel, net) || CONTRAST) : (net && litColor(sel, net));
+      if (!col) continue;
+      if (!whole && sel.kind === "part" && isRail(net) && !inBox(near, x, y)) continue;
+      boxes.push([x, y, w, h, ang, shape, f.side, col]);
+      if (/^TP/.test(ref)) markers.push([x, y, f.side, ref, w]);
+    }
+  }
+  const mat = new THREE.MeshBasicMaterial({ vertexColors: true, depthTest: false, depthWrite: false, transparent: true, opacity: litO });
+  const geos = [];
+  for (const [x, y, w, h, ang, shape, side, col] of boxes) {
+    const t = 0.14, g = shape === "circle" ? new THREE.CylinderGeometry(w / 2, w / 2, t, 20) : new THREE.BoxGeometry(w, t, h);
+    g.deleteAttribute("uv"); g.rotateY(ang * Math.PI / 180);
+    const yy = side === "B" ? layerY("B.Cu") - 0.15 : layerY("F.Cu") + 0.15;
+    g.translate(x, yy, y);
+    const c = new THREE.Color(col), n = g.attributes.position.count, cc = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { cc[i * 3] = c.r; cc[i * 3 + 1] = c.g; cc[i * 3 + 2] = c.b; }
+    g.setAttribute("color", new THREE.BufferAttribute(cc, 3)); geos.push(g.toNonIndexed());
+  }
+  if (geos.length) { const m = new THREE.Mesh(mergeGeometries(geos, false), mat); m.renderOrder = 6; TERM.add(m); }
+  // a part in focus: a small "+" on it, always on top and the same size on screen, so it is easy to find on the board
+  if (sel.kind === "part") for (const ref of sel.parts) {
+    const p = parts.get(ref), f = FP.get(ref);
+    let c = null;
+    if (p) { const b = p.box; c = new THREE.Vector3((b.min.x + b.max.x) / 2, b.max.y + p.mesh.position.y + 0.2, (b.min.z + b.max.z) / 2); }
+    else if (f) c = new THREE.Vector3((f.box[0] + f.box[2]) / 2, (f.side === "B" ? layerY("B.Cu") - 0.3 : layerY("F.Cu") + 0.3), (f.box[1] + f.box[3]) / 2);
+    if (!c) continue;
+    const m = plusMarker(); m.position.copy(c); TERM.add(m);
+  }
+  // test points: a black dot on the pad, flat on the board
+  const dot = new THREE.MeshBasicMaterial({ color: 0x111111, depthTest: false, transparent: true, side: THREE.DoubleSide });
+  for (const [x, y, side, ref, w] of markers) {
+    const up = side === "B" ? -1 : 1, base = side === "B" ? layerY("B.Cu") : layerY("F.Cu");
+    const d = new THREE.Mesh(new THREE.CircleGeometry(Math.max(0.45, w * 0.45), 32), dot);
+    d.rotation.x = -Math.PI / 2; d.position.set(x, base + up * 0.2, y); d.renderOrder = 7;
+    TERM.add(d);
+  }
+}
+function setHover(s) { if (selKey(s) === selKey(hover)) return; hover = s; highlight(current()); send(current(), false); }
+
+// ---------------------------------------------------------------------
+// Picking: the nearest part, else the copper under the pointer (looked up in the ID map)
+// ---------------------------------------------------------------------
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+function pickAt(cx, cy) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const targets = [];
+  for (const p of parts.values()) if (p.mesh.visible && (p.mesh.material.opacity > 0.3 || MODE === "focus")) targets.push(p.mesh);
+  if (CU) { for (const L of CU_LAYERS) if (CU.planes[L].visible) targets.push(CU.planes[L]); if (CU.viaMesh.visible) targets.push(CU.viaMesh); }
+  // a solid board hides what is behind it; a see-through one does not
+  const board = layers.filter(l => l.name === "Board" && l.mesh.visible && l.mesh.material.opacity > 0.9).map(l => l.mesh);
+  targets.push(...board);
+  // parts are see-through, so a pin behind (or inside) a plastic body still counts: the first pin along the ray wins,
+  // else the first part, else the copper; the board itself stops the search
+  let part = null;
+  for (const hit of ray.intersectObjects(targets, false)) {
+    if (hit.object.userData.ref) {
+      const ref = hit.object.userData.ref, net = pinNetAt(ref, hit.faceIndex);
+      if (net) return { kind: "net", net, pin: ref };
+      if (!part) part = { kind: "part", ref };
+      continue;
+    }
+    if (part) return part;
+    if (hit.object.userData.vias) return { kind: "net", net: CU.vias[hit.instanceId][4], via: true };
+    if (hit.object.userData.layer) { const net = netAt(hit.object.userData.layer, hit.uv); if (net) return { kind: "net", net }; continue; }
+    return null;
+  }
+  return part;
+}
+
+// ---------------------------------------------------------------------
+// Tooltip: hover shows it, click keeps it in place (its text can then be selected); click on nothing or Esc lets go
+// ---------------------------------------------------------------------
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const meta = n => { const i = info ? info.nets.indexOf(n) : -1; return i >= 0 ? info.netMeta.nets[i] : null; };
+const plain = s => String(s).replace(/~\{([^}]*)\}/g, "$1̅");
+function netLabel(n) {
+  const m = meta(n); if (m && m[0]) return plain(m[0]);
+  const refs = partsOn.get(n) || []; return refs.length && refs.length <= 3 ? "between " + refs.join(refs.length === 2 ? " and " : ", ") : n;
+}
+function connects(n) {
+  const nodes = (info && info.netNodes[n]) || [], by = new Map();
+  for (const [ref, pin, func] of nodes) { const f = (func || "").replace(/_\d+$/, ""), key = /^[UQ]\d/.test(ref) && f && f !== pin ? `${ref} ${f}` : ref; by.set(key, (by.get(key) || 0) + 1); }
+  const items = [...by].sort((a, b) => /^[UQP]\d/.test(b[0]) - /^[UQP]\d/.test(a[0])).map(([k, c]) => c > 1 ? `${k} ×${c}` : k);
+  return items.slice(0, 10).join(" · ") + (items.length > 10 ? ` · ${items.length - 10} more` : "");
+}
+// "top, inner 2 · 14 vias": where this net runs
+function netLayers(n) {
+  if (!CU) return "";
+  const per = CU.data.nets[n] || {}, on = CU_LAYERS.filter(L => per[L] && (per[L].s.length || per[L].c.length || per[L].p.length)).map(L => LAYER_LABEL[L]);
+  const v = (CU.viasOf.get(n) || []).length;
+  return (on.length ? on.join(", ") : "no copper") + (v ? ` · ${v} via${v > 1 ? "s" : ""}` : "");
+}
+let tipPinned = false;
+function showTip(h, cx, cy) {
+  if (tipPinned) return;
+  if (h.kind === "part") { const P = info && info.parts[h.ref] || {};
+    tip.innerHTML = `<b>${esc(h.ref)}</b> ${esc(P.v || "")}` + (P.d ? `<div class="d">${esc(P.d)}</div>` : "") + `<div class="m">${esc(P.fp || "")}${netsOf.get(h.ref) ? " · " + netsOf.get(h.ref).size + " nets" : ""}</div>`; }
+  else { const m = meta(h.net);
+    tip.innerHTML = `<b>${esc(netLabel(h.net))}</b>${h.via ? " · via" : ""}${h.pin ? ` · pin of ${esc(h.pin)}` : ""}` + (m && m[2] ? `<div class="d">${esc(m[2])}</div>` : "") + `<div class="m">${esc(connects(h.net))}</div>` +
+                    `<div class="m">${esc(netLayers(h.net))}</div>`; }
+  tip.style.opacity = 1;
+  const b = tip.getBoundingClientRect();
+  tip.style.left = Math.min(cx + 14, innerWidth - b.width - 8) + "px"; tip.style.top = Math.min(cy + 16, innerHeight - b.height - 8) + "px";
+}
+const hideTip = () => { if (!tipPinned) tip.style.opacity = 0; };
+const pinTip = () => { tipPinned = true; tip.classList.add("pinned"); };
+const unpinTip = () => { tipPinned = false; tip.classList.remove("pinned"); };
+const selOf = h => !h ? null : h.kind === "part" ? partSel(h.ref) : netSel(h.net);
+let down = null, pickT = 0, lastMove = null;
+renderer.domElement.addEventListener("pointerdown", e => { down = { x: e.clientX, y: e.clientY }; });
+renderer.domElement.addEventListener("pointermove", e => {
+  if (e.buttons) { hideTip(); return; }
+  lastMove = e;
+  if (pickT) return;                                // at most one pick per frame
+  pickT = requestAnimationFrame(() => { pickT = 0; const ev = lastMove, h = pickAt(ev.clientX, ev.clientY);
+    renderer.domElement.style.cursor = h ? "pointer" : "";
+    if (!pinned) setHover(selOf(h));
+    if (h) showTip(h, ev.clientX, ev.clientY); else hideTip(); });
+});
+renderer.domElement.addEventListener("pointerleave", () => { hideTip(); if (!pinned) setHover(null); });
+renderer.domElement.addEventListener("pointerup", e => {
+  if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
+  const h = pickAt(e.clientX, e.clientY), s = selOf(h), again = s && selKey(s) === selKey(pinned);
+  pinned = s && !again ? s : null; hover = null; highlight(current()); send(pinned, true);
+  if (pinned) { unpinTip(); showTip(h, e.clientX, e.clientY); pinTip(); } else { unpinTip(); hideTip(); }
+});
+addEventListener("keydown", e => { if (e.key === "Escape" && e.target.tagName !== "INPUT") { pinned = hover = null; highlight(null); send(null, true); unpinTip(); hideTip(); } });
+
+// ---------------------------------------------------------------------
+// Camera
+// ---------------------------------------------------------------------
+function setView(v, instant) {
+  if (!box) return;
+  const c = box.getCenter(new THREE.Vector3()), r = box.getSize(new THREE.Vector3()).length() / 2;
+  const vf = camera.fov * Math.PI / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * camera.aspect), d = r / Math.sin(Math.min(vf, hf) / 2) * 0.92;
+  const dir = v === "top" ? new THREE.Vector3(0, 1, 0.0001) : v === "bottom" ? new THREE.Vector3(0, -1, 0.0001)
+            : v === "low" ? new THREE.Vector3(0.35, 0.42, 0.9).normalize() : new THREE.Vector3(0, 0.9, 0.75).normalize();     // low: the exploded stack from the side
+  const to = c.clone().add(dir.multiplyScalar(d));
+  camera.up.set(0, 1, 0); if (v === "top" || v === "bottom") camera.up.set(0, 0, v === "top" ? -1 : 1);
+  if (instant) { camera.position.copy(to); controls.target.copy(c); controls.update(); render(); }
+  else { fly = { from: camera.position.clone(), to, tFrom: controls.target.clone(), tTo: c, t0: performance.now() }; render(); }
+  document.querySelectorAll("[data-view]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.view === v)));
+}
+function flyToBox(b) {
+  const c = b.getCenter(new THREE.Vector3()), r = Math.max(8, b.getSize(new THREE.Vector3()).length() / 2);
+  const vf = camera.fov * Math.PI / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * camera.aspect);
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  fly = { from: camera.position.clone(), to: c.clone().add(dir.multiplyScalar(r / Math.sin(Math.min(vf, hf) / 2))), tFrom: controls.target.clone(), tTo: c, t0: performance.now() }; render();
+}
+function netBox(net) {
+  const b = new THREE.Box3(), per = (CU && CU.data.nets[net]) || {}, y = (boardY[0] + boardY[1]) / 2;
+  for (const g of Object.values(per)) { for (let i = 0; i < g.s.length; i += 5) { b.expandByPoint(new THREE.Vector3(g.s[i], y, g.s[i + 1])); b.expandByPoint(new THREE.Vector3(g.s[i + 2], y, g.s[i + 3])); }
+    for (let i = 0; i < g.c.length; i += 3) b.expandByPoint(new THREE.Vector3(g.c[i], y, g.c[i + 1])); }
+  for (const v of (CU && CU.viasOf.get(net)) || []) b.expandByPoint(new THREE.Vector3(v[0], y, v[1]));
+  return b;
+}
+// a part in focus: show it with what it connects to (its neighbours and its signal copper), never closer than ~35 mm across
+const fpBox = r => { const f = FP.get(r), y = (boardY[0] + boardY[1]) / 2; return f ? new THREE.Box3(new THREE.Vector3(f.box[0], y, f.box[1]), new THREE.Vector3(f.box[2], y, f.box[3])) : null; };
+function flyToSel(s) {
+  const b = new THREE.Box3();
+  for (const r of s.parts) if (parts.has(r)) b.union(parts.get(r).box); else if (fpBox(r)) b.union(fpBox(r));
+  if (s.kind === "part") { for (const r of s.near) if (parts.has(r)) b.union(parts.get(r).box); for (const n of s.nets) if (!isRail(n)) b.union(netBox(n)); }
+  if (s.kind === "net") for (const n of s.nets) b.union(netBox(n));
+  if (b.isEmpty()) return;
+  const c = b.getCenter(new THREE.Vector3()), size = b.getSize(new THREE.Vector3()), MIN = 35;
+  b.expandByVector(new THREE.Vector3(Math.max(0, MIN - size.x) / 2, 0, Math.max(0, MIN - size.z) / 2));
+  flyToBox(b);
+}
+function flyStep() {
+  const k = Math.min(1, (performance.now() - fly.t0) / 500), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+  camera.position.lerpVectors(fly.from, fly.to, e); controls.target.lerpVectors(fly.tFrom, fly.tTo, e);
+  if (k >= 1) fly = null;
+}
+document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => setView(b.dataset.view));
+document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { MODE = b.dataset.mode; try { localStorage.setItem("mynd-board3d-mode2", MODE); } catch {} applyMode(); if (MODE === "exploded") setView("low"); });
+document.querySelectorAll("[data-layer]").forEach(b => b.onclick = () => { SHOW[b.dataset.layer] = !SHOW[b.dataset.layer]; layerButtons(); highlight(current()); });
+const find = document.getElementById("find");
+function selectByName(v) {
+  const lv = v.toLowerCase(), ref = [...parts.keys(), ...FP.keys()].find(r => r.toLowerCase() === lv);
+  let s = ref ? partSel(ref) : null;
+  if (!s && CU) { const net = CU.nets.find(n => { const m = meta(n), sh = m ? m[0] : ""; return n.toLowerCase() === lv || sh.toLowerCase() === lv || sh.replace(/[~{}]/g, "").toLowerCase() === lv; }); if (net) s = netSel(net); }
+  if (!s) { status.textContent = `nothing called ${v} on the board`; return; }
+  pinned = s; hover = null; highlight(s); send(s, true); flyToSel(s);
+}
+find.addEventListener("change", () => find.value.trim() && selectByName(find.value.trim()));
+find.addEventListener("keydown", e => { if (e.key === "Enter" && find.value.trim()) selectByName(find.value.trim()); });
+
+// ---------------------------------------------------------------------
+// Sync with schematic.html: { type: "focus", source, kind, parts, nets, pinned }
+// ---------------------------------------------------------------------
+const bus = "BroadcastChannel" in window ? new BroadcastChannel("mynd") : null;
+let lastSent = "";
+function send(sel, isPinned) {
+  if (!bus) return;
+  const msg = { type: "focus", source: "board3d", kind: sel ? sel.kind : null, parts: sel ? (sel.kind === "part" ? [...sel.parts] : [...sel.near]) : [], nets: sel ? [...sel.nets] : [], pinned: !!isPinned };
+  const key = JSON.stringify(msg); if (key === lastSent) return; lastSent = key; bus.postMessage(msg);
+}
+if (bus) bus.onmessage = e => {
+  const m = e.data; if (!m || m.type !== "focus" || m.source === "board3d") return;
+  let s = null;
+  if (m.kind === "net" && m.nets && m.nets.length) s = m.nets.length === 1 ? netSel(m.nets[0]) : { kind: "net", parts: new Set(), nets: new Set(m.nets), near: new Set(m.parts || []) };
+  else if (m.kind === "part" && m.parts && m.parts.length) s = partSel(m.parts[0]);
+  if (m.pinned) { pinned = s; hover = null; if (s) flyToSel(s); } else hover = s;
+  highlight(current());
+};
+
+// ---------------------------------------------------------------------
+// Load: circuit (names, purposes, neighbours), copper, then the model
+// ---------------------------------------------------------------------
+const json = u => fetch(u).then(r => r.ok ? r.json() : null).catch(() => null);
+const [circuit, copperData] = await Promise.all([json(CIRCUIT), json(COPPER)]);
+if (circuit) { info = circuit;
+  for (const [net, nodes] of Object.entries(circuit.netNodes)) { const refs = [...new Set(nodes.map(n => n[0]))]; partsOn.set(net, refs); for (const r of refs) (netsOf.get(r) || netsOf.set(r, new Set()).get(r)).add(net); } }
+new GLTFLoader().load(MODEL, g => {
+  const t0 = performance.now();
+  adopt(g);
+  if (copperData) { buildCopper(copperData); footprintParts(copperData.footprints || []); }
+  applyMode(); setView(QS.get("view") || (MODE === "exploded" ? "low" : "angle"), true);
+  document.getElementById("finds").innerHTML = [...new Set([...parts.keys(), ...FP.keys()])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map(r => `<option value="${esc(r)}">`).join("");
+  status.textContent = `${parts.size - NOT_FITTED.size} parts · ${CU ? CU.nets.length : 0} nets`;
+  status.title = status.dataset.extra || "";
+  console.info(`board ready in ${(performance.now() - t0).toFixed(0)} ms: ${renderer.info.render.calls} draw calls, ${(renderer.info.render.triangles / 1e3).toFixed(0)}k triangles`);
+  if (QS.get("select")) selectByName(QS.get("select"));
+  window.mynd3d = { renderer, scene, camera, get CU() { return CU; }, FP, parts, controls };          // for measuring from the console
+  renderer.render(scene, camera);                       // straight away: animation frames wait while the tab is in the background
+}, x => { if (x.total) status.textContent = `loading ${(x.loaded / 1e6).toFixed(0)} / ${(x.total / 1e6).toFixed(0)} MB`; },
+() => { document.getElementById("drop").classList.add("show"); status.textContent = "no model"; });
+</script>
+</body>
+</html>
