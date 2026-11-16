@@ -15,6 +15,9 @@ Contains KiCad PCB and schematic files for all PCBs. Please note: These files we
 ### `./PDF`
 Contains all schematic and assembly drawings exported to PDF from Altium files.
 
+## GitHub Pages
+Set the repository's Pages source to **GitHub Actions**. The Pages workflow publishes only the contents of `Viewer/`.
+
 ## Don't Yet Own a MYND Speaker!?
 Purchase one [here](https://teufel.de/mynd)!
 
