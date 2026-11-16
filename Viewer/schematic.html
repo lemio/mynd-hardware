@@ -20,7 +20,7 @@ header a { font-size: 12px; color: var(--ink-2); }
 header input { font: 12px "IBM Plex Mono", monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--ink-3); padding: 3px 6px; width: 180px; }
 header input:focus { outline: none; border-color: var(--ink); }
 #status { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-2); }
-.layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 24px; padding: 0 16px 16px; }
+.layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 24px; padding: 16px; }
 .layout { position: relative; }
 .layout.folded { grid-template-columns: minmax(0, 1fr); }
 .layout.folded aside { position: absolute; top: 0; right: 16px; background: transparent; overflow: visible; pointer-events: none; padding: 0; }
@@ -61,19 +61,19 @@ aside h2:first-of-type { margin-top: 10px; }
 .tip.pinned { pointer-events: auto; user-select: text; }
 .tip .t-pins { margin-top: 3px; }
 .tip .t-pn, .tip .t-pins, .tip .t-net { font-family: "IBM Plex Mono", monospace; font-size: calc(10.5px * var(--fs, 1)); color: var(--ink-2); }
+/* no header: the search box appears only once you start typing a part or net name */
+.search { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; gap: 10px; align-items: baseline;
+          background: var(--bg); border: 1px solid var(--ink); padding: 5px 9px; font: 11px "IBM Plex Mono", monospace; color: var(--ink-2); }
+.search[hidden] { display: none; }
+.search input { font: 13px "IBM Plex Mono", monospace; color: var(--ink); background: transparent; border: 0; outline: none; padding: 0; width: 240px; }
 </style>
 </head>
 <body>
-<header>
-  <h1>MYND main board — circuit</h1>
-  <input id="find" list="finds" placeholder="find part or net" autocomplete="off" spellcheck="false"><datalist id="finds"></datalist>
-  <a href="board3d.html" target="mynd-board3d">3D board</a> <a href="index.html">side by side</a>
-  <span id="status">loading…</span>
-</header>
+<div class="search" id="search" hidden><input id="find" list="finds" placeholder="part or net" autocomplete="off" spellcheck="false"><datalist id="finds"></datalist><span id="status"></span></div>
 <div class="layout">
   <div id="view">
     <canvas id="cv"></canvas>
-    <div class="zoom"><button id="zout" title="zoom out">−</button><span id="zpct">100%</span><button id="zin" title="zoom in">+</button><button id="zfit" title="fit (F)">⤢</button></div>
+    <div class="zoom"><button id="zout" title="zoom out">−</button><span id="zpct">100%</span><button id="zin" title="zoom in">+</button><button id="zfit" title="fit">⤢</button></div>
     <div id="drop">
       <div>The circuit data could not be fetched. Open this page through a local server:</div>
       <div><code>cd Viewer && python3 -m http.server 8000</code> → <code>http://localhost:8000/schematic.html</code></div>
@@ -649,11 +649,8 @@ document.getElementById("zfit").onclick = () => fitAll();
 addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT") { if (e.key === "Escape") e.target.blur(); return; }
   if (e.key === "Escape") { pinned = null; hover = null; draw(); send(null, true); unpinTip(); hideTip(); }
-  else if (e.key === "f" || e.key === "0") fitAll();
   else if (e.key === "+" || e.key === "=") zoomAt(W / 2, H / 2, 1.4);
   else if (e.key === "-") zoomAt(W / 2, H / 2, 1 / 1.4);
-  else if (/^[1-9]$/.test(e.key) && D.areas[+e.key - 1]) showArea(+e.key - 1);
-  else if (e.key === "/") { e.preventDefault(); document.getElementById("find").focus(); }
 });
 const VIEW_KEY = "mynd-circuit-view";
 let saveT = 0;
@@ -932,17 +929,32 @@ if (bus) bus.onmessage = e => {
 // ---------------------------------------------------------------------
 (async () => {
   try { const r = await fetch(DATA_URL); if (!r.ok) throw new Error(r.status); D = await r.json(); }
-  catch (err) { document.getElementById("drop").classList.add("show"); status.textContent = "no data"; return; }
+  catch (err) { document.getElementById("drop").classList.add("show"); status.textContent = ""; return; }
   if (document.fonts) await Promise.race([document.fonts.load('9px "IBM Plex Mono"'), new Promise(r => setTimeout(r, 1500))]);
   build(); buildFind(); drawLegend();
   DPR = Math.min(devicePixelRatio || 1, 2); W = view.clientWidth; H = view.clientHeight; cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
   const aq = QS.get("area"), ai = aq ? D.areas.findIndex(A => A.name === aq || A.name.replace(/^U_/, "") === aq) : -1;
   const centre = b => { const s = fitScale(b, 30); cam.s = s; cam.x = W / 2 - (b[0] + b[2]) / 2 * s; cam.y = H / 2 - (b[1] + b[3]) / 2 * s; };
   if (ai >= 0) centre(D.areas[ai].box); else if (!restoreView()) centre(D.extent);
-  status.textContent = `${D.byRef.size} parts · ${D.nets.length} nets · ${D.areas.length} areas`;
   if (QS.get("select")) selectByName(QS.get("select"), true);
   paint();                       // straight away: animation frames wait while the tab is in the background
 })();
+
+// ---------------------------------------------------------------------
+// Search: hidden until you type a part or net name anywhere on the page; Esc (or clicking away while empty) hides it
+// ---------------------------------------------------------------------
+{
+  const box = document.getElementById("search"), input = document.getElementById("find");
+  const close = () => { input.value = ""; document.getElementById("status").textContent = ""; box.hidden = true; input.blur(); };
+  addEventListener("keydown", e => {
+    if (e.target.tagName === "INPUT" || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1 || e.key === " " || /[+=\-]/.test(e.key)) return;
+    box.hidden = false; input.focus();               // the key that was typed lands in the box
+  }, true);
+  input.addEventListener("keydown", e => { if (e.key === "Escape") { e.stopPropagation(); close(); } });
+  input.addEventListener("blur", () => { if (!input.value) close(); });
+  input.addEventListener("input", () => { document.getElementById("status").textContent = ""; });
+  input.addEventListener("change", () => setTimeout(() => { if (!document.getElementById("status").textContent) close(); }, 0));
+}
 </script>
 </body>
 </html>

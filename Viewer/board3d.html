@@ -37,6 +37,11 @@ header input:focus { outline: none; border-color: var(--ink); }
 .tip b { font-weight: 500; }
 .tip .d { margin: 3px 0; }
 .tip .m { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-2); }
+/* no header: the search box appears only once you start typing a part or net name */
+.search { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; gap: 10px; align-items: baseline;
+          background: var(--bg); border: 1px solid var(--ink); padding: 5px 9px; font: 11px "IBM Plex Mono", monospace; color: var(--ink-2); }
+.search[hidden] { display: none; }
+.search input { font: 13px "IBM Plex Mono", monospace; color: var(--ink); background: transparent; border: 0; outline: none; padding: 0; width: 240px; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -46,12 +51,7 @@ header input:focus { outline: none; border-color: var(--ink); }
 </script>
 </head>
 <body>
-<header>
-  <h1>MYND main board — 3D</h1>
-  <input id="find" list="finds" placeholder="find part or net" autocomplete="off" spellcheck="false"><datalist id="finds"></datalist>
-  <a href="schematic.html" target="mynd-schematic">circuit</a> <a href="index.html">side by side</a>
-  <span id="status">loading…</span>
-</header>
+<div class="search" id="search" hidden><input id="find" list="finds" placeholder="part or net" autocomplete="off" spellcheck="false"><datalist id="finds"></datalist><span id="status"></span></div>
 <div id="view">
   <div class="ctl" title="hover copper or a pin to select its net · click to keep it">
     <span>mode</span><div><button data-mode="focus">focus</button><button data-mode="realistic">real</button><button data-mode="engineering">layers</button><button data-mode="exploded">exploded</button></div>
@@ -467,7 +467,8 @@ function highlight(sel) {
   const see = (!!sel && !focus) || inner;
   for (const { mesh, name } of layers) {
     const m = mesh.material, B = m.userData.base;
-    mesh.visible = name !== "Copper" && (real() || name === "Board") && !(MODE === "exploded" && name !== "Board");
+    // focus mode: less clutter, more information — no silkscreen print (designators, logos, boxes) on the board
+    mesh.visible = name !== "Copper" && (real() || name === "Board") && !(MODE === "exploded" && name !== "Board") && !(focus && name === "Silkscreen");
     if (name === "Mask") m.color.set(real() ? RED_MASK : B.color);          // this board is red
     const dim = focus && !!sel;                                   // focus mode, something in focus: the board a bit see-through
     if (name === "Board") { if (eng) m.color.set(0x3a3a3a); else m.color.copy(B.color); setOpacity(m, MODE === "exploded" ? 0.08 : eng ? 0.3 : see ? 0.35 : dim ? 0.6 : B.opacity); }
@@ -839,14 +840,29 @@ new GLTFLoader().load(MODEL, g => {
   if (copperData) { buildCopper(copperData); footprintParts(copperData.footprints || []); }
   applyMode(); setView(QS.get("view") || (MODE === "exploded" ? "low" : "angle"), true);
   document.getElementById("finds").innerHTML = [...new Set([...parts.keys(), ...FP.keys()])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map(r => `<option value="${esc(r)}">`).join("");
-  status.textContent = `${parts.size - NOT_FITTED.size} parts · ${CU ? CU.nets.length : 0} nets`;
   status.title = status.dataset.extra || "";
   console.info(`board ready in ${(performance.now() - t0).toFixed(0)} ms: ${renderer.info.render.calls} draw calls, ${(renderer.info.render.triangles / 1e3).toFixed(0)}k triangles`);
   if (QS.get("select")) selectByName(QS.get("select"));
   window.mynd3d = { renderer, scene, camera, get CU() { return CU; }, FP, parts, controls };          // for measuring from the console
   renderer.render(scene, camera);                       // straight away: animation frames wait while the tab is in the background
-}, x => { if (x.total) status.textContent = `loading ${(x.loaded / 1e6).toFixed(0)} / ${(x.total / 1e6).toFixed(0)} MB`; },
-() => { document.getElementById("drop").classList.add("show"); status.textContent = "no model"; });
+}, x => {},
+() => { document.getElementById("drop").classList.add("show"); status.textContent = ""; });
+
+// ---------------------------------------------------------------------
+// Search: hidden until you type a part or net name anywhere on the page; Esc (or clicking away while empty) hides it
+// ---------------------------------------------------------------------
+{
+  const box = document.getElementById("search"), input = document.getElementById("find");
+  const close = () => { input.value = ""; document.getElementById("status").textContent = ""; box.hidden = true; input.blur(); };
+  addEventListener("keydown", e => {
+    if (e.target.tagName === "INPUT" || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1 || e.key === " " || /[+=\-]/.test(e.key)) return;
+    box.hidden = false; input.focus();               // the key that was typed lands in the box
+  }, true);
+  input.addEventListener("keydown", e => { if (e.key === "Escape") { e.stopPropagation(); close(); } });
+  input.addEventListener("blur", () => { if (!input.value) close(); });
+  input.addEventListener("input", () => { document.getElementById("status").textContent = ""; });
+  input.addEventListener("change", () => setTimeout(() => { if (!document.getElementById("status").textContent) close(); }, 0));
+}
 </script>
 </body>
 </html>
